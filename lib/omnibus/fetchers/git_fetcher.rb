@@ -62,11 +62,11 @@ module Omnibus
       create_required_directories
 
       if cloned?
-        git_fetch(resolved_version) unless same_revision?(resolved_version)
+        git_fetch unless same_revision?(resolved_version)
       else
         force_recreate_project_dir! unless dir_empty?(project_dir)
         git_clone
-        git_checkout(resolved_version)
+        git_checkout
       end
     end
 
@@ -113,7 +113,7 @@ module Omnibus
     # Forcibly remove and recreate the project directory
     #
     def force_recreate_project_dir!
-      log.warn(log_key) { "Removing exisitng directory #{project_dir} before cloning" }
+      log.warn(log_key) { "Removing existing directory #{project_dir} before cloning" }
       FileUtils.rm_rf(project_dir)
       Dir.mkdir(project_dir)
     end
@@ -141,9 +141,8 @@ module Omnibus
     #
     # @return [void]
     #
-    def git_checkout(ref=resolved_version)
-      git("fetch --all")
-      git("checkout #{ref}")
+    def git_checkout
+      git("checkout #{resolved_version}")
     end
 
     #
@@ -151,9 +150,9 @@ module Omnibus
     #
     # @return [void]
     #
-    def git_fetch(ref=resolved_version)
-      git("fetch --all")
-      git("reset --hard #{ref}")
+    def git_fetch
+      git("fetch #{source_url} #{described_version}#{' --recurse-submodules=on-demand' if clone_submodules?}")
+      git("reset --hard #{resolved_version}")
     end
 
     #
@@ -193,6 +192,13 @@ module Omnibus
 
     def self.resolve_version(ref, source)
       if sha_hash?(ref)
+        # A git server negotiates in terms of refs during the info-refs phase of a fetch.
+        # During upload-pack, the client is not allowed to specify any sha1s in the "wants"
+        # unless the server has publicized them during info-refs.  Hence, the server is allowed
+        # to drop requests to fetch particular sha1s, even if it is an otherwise reachable
+        # commit object.  Only when the service is specifically configured with
+        # uploadpack.allowReachableSHA1InWant is there any guarantee that it consider "naked" wants.
+        log.warn(log_key) { 'A sha1 hash is not a ref name and there is no guarantee that you will be fetching the commits you need.'}
         ref
       else
         revision_from_remote_reference(ref, source)
@@ -205,7 +211,7 @@ module Omnibus
     # @return [true, false]
     #
     def self.sha_hash?(rev)
-      rev =~ /^[0-9a-f]{4,40}$/
+      rev =~ /^[0-9a-fA-F]{4,40}$/
     end
 
     #

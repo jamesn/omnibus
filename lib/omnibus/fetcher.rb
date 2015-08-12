@@ -44,6 +44,12 @@ module Omnibus
     attr_reader :resolved_version
 
     #
+    # The upstream version as described before resolution.  This
+    # will usually be the same as +resolved_version+ but may refer to
+    # a remote ref name or tag for a source such as git.
+    attr_reader :described_version
+
+    #
     # The path where extracted software should live.
     #
     # @return [String]
@@ -64,6 +70,7 @@ module Omnibus
       @name    = manifest_entry.name
       @source  = manifest_entry.locked_source
       @resolved_version = manifest_entry.locked_version
+      @described_version = manifest_entry.described_version
       @project_dir = project_dir
       @build_dir = build_dir
     end
