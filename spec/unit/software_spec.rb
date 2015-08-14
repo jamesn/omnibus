@@ -43,11 +43,11 @@ module Omnibus
       it_behaves_like 'a cleanroom getter', :project_file
     end
 
-    describe "with_standard_compiler_flags helper" do
-      context "on ubuntu" do
+    describe 'with_standard_compiler_flags helper' do
+      context 'on ubuntu' do
         before { stub_ohai(platform: 'ubuntu', version: '12.04') }
 
-        it "sets the defaults" do
+        it 'sets the defaults' do
           expect(subject.with_standard_compiler_flags).to eq(
             'LDFLAGS'         => '-Wl,-rpath,/opt/project/embedded/lib -L/opt/project/embedded/lib',
             'CFLAGS'          => '-I/opt/project/embedded/include',
@@ -123,8 +123,8 @@ module Omnibus
             'CC'              => 'gcc -static-libgcc',
             'LDFLAGS'         => '-R/opt/project/embedded/lib -L/opt/project/embedded/lib -static-libgcc',
             'CFLAGS'          => '-I/opt/project/embedded/include',
-            "CXXFLAGS"        => "-I/opt/project/embedded/include",
-            "CPPFLAGS"        => "-I/opt/project/embedded/include",
+            'CXXFLAGS'        => '-I/opt/project/embedded/include',
+            'CPPFLAGS'        => '-I/opt/project/embedded/include',
             'LD_RUN_PATH'     => '/opt/project/embedded/lib',
             'LD_OPTIONS'      => '-R/opt/project/embedded/lib',
             'PKG_CONFIG_PATH' => '/opt/project/embedded/lib/pkgconfig'
@@ -132,12 +132,14 @@ module Omnibus
         end
 
         context 'when loader mapping file is specified' do
+          # Let the unit tests run on windows where auto-path translation occurs.
+          let(:project_root) {windows? ? 'C:/root/project' : '/root/project'}
           before do
             stub_ohai(platform: 'solaris2', version: '5.11') do |data|
               # For some reason, this isn't set in Fauxhai
               data['platform'] = 'solaris2'
             end
-            Config.project_root('/root/project')
+            Config.project_root(project_root)
             Config.solaris_linker_mapfile('files/mapfile/solaris')
             allow(File).to receive(:exist?).and_return(true)
           end
@@ -147,10 +149,10 @@ module Omnibus
               'CC'              => 'gcc -static-libgcc',
               'LDFLAGS'         => '-R/opt/project/embedded/lib -L/opt/project/embedded/lib -static-libgcc',
               'CFLAGS'          => '-I/opt/project/embedded/include',
-              "CXXFLAGS"        => "-I/opt/project/embedded/include",
-              "CPPFLAGS"        => "-I/opt/project/embedded/include",
+              'CXXFLAGS'        => '-I/opt/project/embedded/include',
+              'CPPFLAGS'        => '-I/opt/project/embedded/include',
               'LD_RUN_PATH'     => '/opt/project/embedded/lib',
-              'LD_OPTIONS'      => '-R/opt/project/embedded/lib -M /root/project/files/mapfile/solaris',
+              'LD_OPTIONS'      => "-R/opt/project/embedded/lib -M #{project_root}/files/mapfile/solaris",
               'PKG_CONFIG_PATH' => '/opt/project/embedded/lib/pkgconfig'
             )
           end
@@ -164,8 +166,8 @@ module Omnibus
           expect(subject.with_standard_compiler_flags).to eq(
             'LDFLAGS'         => '-L/opt/project/embedded/lib',
             'CFLAGS'          => '-I/opt/project/embedded/include',
-            "CXXFLAGS"        => "-I/opt/project/embedded/include",
-            "CPPFLAGS"        => "-I/opt/project/embedded/include",
+            'CXXFLAGS'        => '-I/opt/project/embedded/include',
+            'CPPFLAGS'        => '-I/opt/project/embedded/include',
             'LD_RUN_PATH'     => '/opt/project/embedded/lib',
             'PKG_CONFIG_PATH' => '/opt/project/embedded/lib/pkgconfig'
           )
@@ -185,8 +187,8 @@ module Omnibus
             'CC'              => 'xlc_r -q64',
             'CXX'             => 'xlC_r -q64',
             'CFLAGS'          => '-q64 -I/opt/project/embedded/include -D_LARGE_FILES -O',
-            "CXXFLAGS"        => "-q64 -I/opt/project/embedded/include -D_LARGE_FILES -O",
-            "CPPFLAGS"        => "-q64 -I/opt/project/embedded/include -D_LARGE_FILES -O",
+            'CXXFLAGS'        => '-q64 -I/opt/project/embedded/include -D_LARGE_FILES -O',
+            'CPPFLAGS'        => '-q64 -I/opt/project/embedded/include -D_LARGE_FILES -O',
             'LDFLAGS'         => '-q64 -L/opt/project/embedded/lib -Wl,-blibpath:/opt/project/embedded/lib:/usr/lib:/lib',
             'LD'              => 'ld -b64',
             'OBJECT_MODE'     => '64',
@@ -322,16 +324,16 @@ module Omnibus
       end
     end
 
-    describe "#manifest_entry" do
+    describe '#manifest_entry' do
       let(:a_source) do
         { url: 'http://example.com/',
           md5: 'abcd1234' }
       end
 
-      let(:manifest_entry) {Omnibus::ManifestEntry.new("software", {locked_version: "1.2.8", locked_source: a_source})}
+      let(:manifest_entry) {Omnibus::ManifestEntry.new('software', {locked_version: '1.2.8', locked_source: a_source})}
       let(:manifest) do
         m = Omnibus::Manifest.new
-        m.add("software", manifest_entry)
+        m.add('software', manifest_entry)
       end
 
       let(:project_with_manifest) do
@@ -358,20 +360,20 @@ module Omnibus
         end
       end
 
-      it "constructs a manifest entry if no manifest was provided" do
+      it 'constructs a manifest entry if no manifest was provided' do
         expect(project_without_manifest.manifest_entry).to be_a Omnibus::ManifestEntry
-        expect(project_without_manifest.manifest_entry.locked_version).to eq("1.2.3")
+        expect(project_without_manifest.manifest_entry.locked_version).to eq('1.2.3')
         expect(project_without_manifest.manifest_entry.locked_source).to eq(a_source)
       end
 
-      it "constructs a manifest entry with a fully resolved version" do
-        expect(Omnibus::Fetcher).to receive(:resolve_version).with("1.2.3", a_source).and_return("1.2.8")
-        expect(project_without_manifest.manifest_entry.locked_version).to eq("1.2.8")
+      it 'constructs a manifest entry with a fully resolved version' do
+        expect(Omnibus::Fetcher).to receive(:resolve_version).with('1.2.3', a_source).and_return('1.2.8')
+        expect(project_without_manifest.manifest_entry.locked_version).to eq('1.2.8')
       end
 
-      it "returns the entry from the user-provided manifest if it was given one" do
+      it 'returns the entry from the user-provided manifest if it was given one' do
         expect(project_with_manifest.manifest_entry).to eq(manifest_entry)
-        expect(project_with_manifest.manifest_entry.locked_version).to eq("1.2.8")
+        expect(project_with_manifest.manifest_entry.locked_version).to eq('1.2.8')
         expect(project_with_manifest.manifest_entry.locked_source).to eq(a_source)
       end
 
