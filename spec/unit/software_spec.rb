@@ -133,7 +133,7 @@ module Omnibus
 
         context 'when loader mapping file is specified' do
           # Let the unit tests run on windows where auto-path translation occurs.
-          let(:project_root) {windows? ? 'C:/root/project' : '/root/project'}
+          let(:project_root) { File.join(tmp_path, '/root/project') }
           before do
             stub_ohai(platform: 'solaris2', version: '5.11') do |data|
               # For some reason, this isn't set in Fauxhai
@@ -303,6 +303,9 @@ module Omnibus
         end
 
         context '`Path` does not exist in the environment' do
+          before do
+            allow(ENV).to receive(:keys).and_return(['PATH'])
+          end
           it 'returns a path key of `PATH`' do
             expect(subject.with_embedded_path).to eq(
               'PATH' => prepended_path
