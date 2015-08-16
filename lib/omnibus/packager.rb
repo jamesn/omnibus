@@ -24,6 +24,7 @@ module Omnibus
     autoload :Makeself, 'omnibus/packagers/makeself'
     autoload :MSI,      'omnibus/packagers/msi'
     autoload :PKG,      'omnibus/packagers/pkg'
+    autoload :PKGNG,    'omnibus/packagers/pkgng'
     autoload :Solaris,  'omnibus/packagers/solaris'
     autoload :RPM,      'omnibus/packagers/rpm'
 
@@ -41,6 +42,7 @@ module Omnibus
       'solaris2' => Solaris,
       'windows'  => MSI,
       'mac_os_x' => PKG,
+      'freebsd'  => PKGNG
     }.freeze
 
     #
