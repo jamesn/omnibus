@@ -30,14 +30,14 @@ module Omnibus
       # @return [Software]
       #
       def load(project, name, manifest)
-        loaded_softwares[name] ||= begin
+        loaded_softwares["#{project.name}:#{name}"] ||= begin
           filepath = Omnibus.software_path(name)
 
           if filepath.nil?
             raise MissingSoftware.new(name)
           else
             log.internal(log_key) do
-              "Loading software `#{name}' from `#{filepath}'."
+              "Loading software `#{name}' from `#{filepath}' using overrides from #{project.name}."
             end
           end
 
@@ -176,6 +176,28 @@ module Omnibus
     end
     expose :description
 
+
+    #
+    # Sets the maintainer of the software.  Currently this is for
+    # human consumption only and the tool doesn't do anything with it.
+    #
+    # @example
+    #   maintainer "Joe Bob <joeb@chef.io>"
+    #
+    # @param [String] val
+    #   the maintainer of this sofware def
+    #
+    # @return [String]
+    #
+    def maintainer(val = NULL)
+      if null?(val)
+        @maintainer
+      else
+        @description = val
+      end
+    end
+    expose :maintainer
+
     #
     # Add a software dependency to this software.
     #
@@ -227,10 +249,23 @@ module Omnibus
     #   the SHA256 checksum of the downloaded artifact
     # @option val [String] :sha512 (nil)
     #   the SHA512 checksum of the downloaded artifact
+    #
+    # Only used in net_fetcher:
+    #
     # @option val [String] :cookie (nil)
     #   a cookie to set
     # @option val [String] :warning (nil)
     #   a warning message to print when downloading
+    # @option val [Symbol] :extract (nil)
+    #   either :tar, :lax_tar :seven_zip
+    #
+    # Only used in path_fetcher:
+    #
+    # @option val [Hash] :options (nil)
+    #   flags/options that are passed through to file_syncer in path_fetcher
+    #
+    # Only used in git_fetcher:
+    #
     # @option val [Boolean] :submodules (false)
     #   clone git submodules
     #
@@ -245,8 +280,13 @@ module Omnibus
             "be a kind of `Hash', but was `#{val.class.inspect}'")
         end
 
-        extra_keys = val.keys - [:git, :path, :url, :md5, :sha1, :sha256, :sha512,
-                                 :cookie, :warning, :unsafe, :options, :submodules]
+        extra_keys = val.keys - [
+          :git, :path, :url, # fetcher types
+          :md5, :sha1, :sha256, :sha512, # hash type - common to all fetchers
+          :cookie, :warning, :unsafe, :extract, # used by net_fetcher
+          :options, # used by path_fetcher
+          :submodules # used by git_fetcher
+        ]
         unless extra_keys.empty?
           raise InvalidValue.new(:source,
             "only include valid keys. Invalid keys: #{extra_keys.inspect}")
@@ -303,18 +343,30 @@ module Omnibus
     # @return [String, Proc]
     #
     def version(val = NULL, &block)
+      final_version = apply_overrides(:version)
+
       if block_given?
         if val.equal?(NULL)
           raise InvalidValue.new(:version,
             'pass a block when given a version argument')
         else
-          if val == apply_overrides(:version)
+          if val == final_version
             block.call
           end
         end
       end
 
-      apply_overrides(:version)
+      return if final_version.nil?
+
+      begin
+        Chef::Sugar::Constraints::Version.new(final_version)
+      rescue ArgumentError
+        log.warn(log_key) do
+          "Version #{final_version} for software #{name} was not parseable. " \
+          'Comparison methods such as #satisfies? will not be available for this version.'
+        end
+        final_version
+      end
     end
     expose :version
 
@@ -338,19 +390,30 @@ module Omnibus
     expose :whitelist_file
 
     #
-    # The relative path inside the extracted tarball.
+    # The path relative to fetch_dir where relevant project files are
+    # stored. This applies to all sources.
+    #
+    # Any command executed in the build step are run after cwd-ing into
+    # this path. The default is to stay at the top level of fetch_dir
+    # where the source tar-ball/git repo/file/directory has been staged.
     #
     # @example
     #   relative_path 'example-1.2.3'
     #
     # @param [String] val
-    #   the relative path inside the tarball
+    #   the relative path inside the source directory. default: '.'
+    #
+    # Due to back-compat reasons, relative_path works completely
+    # differently for anything other than tar-balls/archives. In those
+    # situations, the source is checked out rooted at relative_path
+    # instead 'cause reasons.
+    # TODO: Fix this in omnibus 6.
     #
     # @return [String]
     #
     def relative_path(val = NULL)
       if null?(val)
-        @relative_path || name
+        @relative_path || '.'
       else
         @relative_path = val
       end
@@ -358,12 +421,22 @@ module Omnibus
     expose :relative_path
 
     #
-    # The path where the extracted software lives.
+    # The path where the extracted software lives. All build commands
+    # associated with this software definition are run for under this path.
+    #
+    # Why is it called project_dir when this is a software definition, I hear
+    # you cry. Because history and reasons. This really is a location
+    # underneath the global omnibus source directory that you have focused
+    # into using relative_path above.
+    #
+    # These are not the only files your project fetches. They are merely the
+    # files that your project cares about. A source tarball may contain more
+    # directories that are not under your project_dir.
     #
     # @return [String]
     #
     def project_dir
-      File.expand_path("#{Config.source_dir}/#{relative_path}")
+      File.expand_path("#{fetch_dir}/#{relative_path}")
     end
     expose :project_dir
 
@@ -447,6 +520,8 @@ module Omnibus
     #
     # Supported options:
     #    :aix => :use_gcc    force using gcc/g++ compilers on aix
+    #    :bfd_flags => true   the default build targets for windows based on
+    #       the current platform architecture are added ARFLAGS and RCFLAGS.
     #
     # @param [Hash] env
     # @param [Hash] opts
@@ -471,7 +546,7 @@ module Omnibus
         when "mac_os_x"
           {
             "LDFLAGS" => "-L#{install_dir}/embedded/lib",
-            "CFLAGS" => "-I#{install_dir}/embedded/include",
+            "CFLAGS" => "-I#{install_dir}/embedded/include -O2",
           }
         when "solaris2"
           {
@@ -484,7 +559,7 @@ module Omnibus
         when "freebsd"
           freebsd_flags = {
             "LDFLAGS" => "-L#{install_dir}/embedded/lib",
-            "CFLAGS" => "-I#{install_dir}/embedded/include",
+            "CFLAGS" => "-I#{install_dir}/embedded/include -O2",
           }
           # Clang became the default compiler in FreeBSD 10+
           if Ohai['os_version'].to_i >= 1000024
@@ -494,13 +569,33 @@ module Omnibus
             )
           end
           freebsd_flags
+        when "windows"
+          arch_flag = windows_arch_i386? ? "-m32" : "-m64"
+          opt_flag = windows_arch_i386? ? "-march=i686" : "-march=x86-64"
+          {
+            "LDFLAGS" => "-L#{install_dir}/embedded/lib #{arch_flag}",
+            # If we're happy with these flags, enable SSE for other platforms running x86 too.
+            "CFLAGS" => "-I#{install_dir}/embedded/include #{arch_flag} -O3 -mfpmath=sse -msse2 #{opt_flag}"
+          }
         else
           {
             "LDFLAGS" => "-Wl,-rpath,#{install_dir}/embedded/lib -L#{install_dir}/embedded/lib",
-            "CFLAGS" => "-I#{install_dir}/embedded/include",
+            "CFLAGS" => "-I#{install_dir}/embedded/include -O2",
           }
         end
 
+      # There are some weird, misbehaving makefiles on windows that hate ARFLAGS because it
+      # replaces the "rcs" flags in some build steps.  So we provide this flag behind an
+      # optional flag.
+      if opts[:bfd_flags] && windows?
+        bfd_target = windows_arch_i386? ? "pe-i386" : "pe-x86-64"
+        compiler_flags.merge!(
+          {
+            "RCFLAGS" => "--target=#{bfd_target}",
+            "ARFLAGS" => "--target=#{bfd_target}",
+          }
+        )
+      end
       # merge LD_RUN_PATH into the environment.  most unix distros will fall
       # back to this if there is no LDFLAGS passed to the linker that sets
       # the rpath.  the LDFLAGS -R or -Wl,-rpath will override this, but in
@@ -550,11 +645,15 @@ module Omnibus
     # for the platform is used to join the paths.
     #
     # @param [Hash] env
+    # @param [Hash] opts
+    #   :msys => true  add the embedded msys path if building on windows.
     #
     # @return [Hash]
     #
-    def with_embedded_path(env = {})
-      path_value = prepend_path("#{install_dir}/bin", "#{install_dir}/embedded/bin")
+    def with_embedded_path(env = {}, opts = {})
+      paths = ["#{install_dir}/bin", "#{install_dir}/embedded/bin"]
+      paths << "#{install_dir}/embedded/msys/1.0/bin" if opts[:msys] && windows?
+      path_value = prepend_path(paths)
       env.merge(path_key => path_value)
     end
     expose :with_embedded_path
@@ -711,6 +810,24 @@ module Omnibus
     # @!endgroup
     # --------------------------------------------------
 
+    #
+    # Path to where any source is extracted to.
+    #
+    # Files in a source directory are staged underneath here. Files from
+    # a url are fetched and extracted here. Look outside this directory
+    # at your own peril.
+    #
+    # @return [String] the full absolute path to the software root fetch
+    #   directory.
+    #
+    def fetch_dir(val = NULL)
+      if null?(val)
+        @fetch_dir || File.expand_path("#{Config.source_dir}/#{name}")
+      else
+        @fetch_dir = val
+      end
+    end
+
     # @todo see comments on {Omnibus::Fetcher#without_caching_for}
     def version_guid
       fetcher.version_guid
@@ -736,16 +853,33 @@ module Omnibus
     #
     # The fetcher for this software
     #
+    # This is where we handle all the crazy back-compat on relative_path.
+    # All fetchers in omnibus 4 use relative_path incorrectly. net_fetcher was
+    # the only one to use to sensibly, and even then only if fetch_dir was
+    # Config.source_dir and the source was an archive. Therefore, to not break
+    # everyone ever, we will still pass project_dir for all other fetchers.
+    # There is still one issue where other omnibus software (such as the
+    # appbundler dsl) currently assume that fetch_dir the same as source_dir.
+    # Therefore, we make one extra concession - when relative_path is set in a
+    # software definition to be the same as name (a very common scenario), we
+    # land the source into the fetch directory instead of project_dir. This
+    # is to avoid fiddling with the appbundler dsl until it gets sorted out.
+    #
     # @return [Fetcher]
     #
     def fetcher
-      @fetcher ||= Fetcher.fetcher_class_for_source(self.source).new(manifest_entry, project_dir, build_dir)
+      @fetcher ||=
+        if source_type == :url && File.basename(source[:url], '?*').end_with?(*NetFetcher::ALL_EXTENSIONS)
+          Fetcher.fetcher_class_for_source(self.source).new(manifest_entry, fetch_dir, build_dir)
+        else
+          Fetcher.fetcher_class_for_source(self.source).new(manifest_entry, project_dir, build_dir)
+        end
     end
 
     #
     # The type of source specified for this software defintion.
     #
-    # @return [String]
+    # @return [Symbol]
     #
     def source_type
       if source

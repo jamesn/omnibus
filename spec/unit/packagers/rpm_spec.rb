@@ -16,9 +16,10 @@ module Omnibus
 
     subject { described_class.new(project) }
 
-    let(:project_root) { "#{tmp_path}/project/root" }
-    let(:package_dir)  { "#{tmp_path}/package/dir" }
-    let(:staging_dir)  { "#{tmp_path}/staging/dir" }
+    let(:project_root) { File.join(tmp_path, 'project/root') }
+    let(:package_dir)  { File.join(tmp_path, 'package/dir') }
+    let(:staging_dir)  { File.join(tmp_path, 'staging/dir') }
+    let(:architecture) { 'x86_64' }
 
     before do
       Config.project_root(project_root)
@@ -32,7 +33,9 @@ module Omnibus
       create_directory("#{staging_dir}/SOURCES")
       create_directory("#{staging_dir}/SPECS")
 
-      stub_ohai(platform: 'redhat', version: '6.5')
+      stub_ohai(platform: 'redhat', version: '6.5') do |data|
+        data['kernel']['machine'] = architecture
+      end
     end
 
     describe '#signing_passphrase' do
@@ -144,7 +147,6 @@ module Omnibus
         expect(contents).to include("Version: 1.2.3")
         expect(contents).to include("Release: 2.el6")
         expect(contents).to include("Summary:  The full stack of project")
-        expect(contents).to include("BuildArch: x86_64")
         expect(contents).to include("AutoReqProv: no")
         expect(contents).to include("BuildRoot: %buildroot")
         expect(contents).to include("Prefix: /")
@@ -224,14 +226,32 @@ module Omnibus
 
       context 'when leaf directories owned by the filesystem package are present' do
         before do
-          create_file("#{staging_dir}/BUILD/opt")
+          create_directory("#{staging_dir}/BUILD/usr/lib")
+          create_directory("#{staging_dir}/BUILD/opt")
+          create_file("#{staging_dir}/BUILD/opt/thing")
         end
 
-        it 'does not write them into the spec' do
+        it 'is written into the spec with ownership and permissions' do
           subject.write_rpm_spec
           contents = File.read(spec_file)
 
-          expect(contents).to_not include("/opt")
+          expect(contents).to include("%dir %attr(0755,root,root) /opt")
+          expect(contents).to include("%dir %attr(0555,root,root) /usr/lib")
+        end
+      end
+
+      context 'when the platform_family is wrlinux' do
+        let(:spec_file) { "#{staging_dir}/SPECS/project-1.2.3-2.nexus5.x86_64.rpm.spec" }
+
+        before do
+          stub_ohai(platform: 'nexus', version: '5')
+        end
+
+        it 'writes out a spec file with no BuildArch' do
+          subject.write_rpm_spec
+          contents = File.read(spec_file)
+
+          expect(contents).not_to include("BuildArch")
         end
       end
     end
@@ -249,7 +269,7 @@ module Omnibus
 
       it 'uses the correct command' do
         expect(subject).to receive(:shellout!)
-          .with(/rpmbuild -bb --buildroot/)
+          .with(/rpmbuild --target #{architecture} -bb --buildroot/)
         subject.create_rpm_file
       end
 
@@ -361,6 +381,36 @@ module Omnibus
           end
 
           expect(output).to include("The `version' component of RPM package names can only include")
+        end
+      end
+
+      context 'when the build is for nexus' do
+        before do
+          project.build_version('1.2-3')
+          stub_ohai(platform: 'nexus', version: '5')
+        end
+
+        it 'returns the value while logging a message' do
+          output = capture_logging do
+            expect(subject.safe_version).to eq('1.2_3')
+          end
+
+          expect(output).to include("rpmbuild on Wind River Linux does not support this")
+        end
+      end
+
+      context 'when the build is for ios_xr' do
+        before do
+          project.build_version('1.2-3')
+          stub_ohai(platform: 'ios_xr', version: '6.0.0.14I')
+        end
+
+        it 'returns the value while logging a message' do
+          output = capture_logging do
+            expect(subject.safe_version).to eq('1.2_3')
+          end
+
+          expect(output).to include("rpmbuild on Wind River Linux does not support this")
         end
       end
     end

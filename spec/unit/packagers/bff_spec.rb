@@ -15,11 +15,15 @@ module Omnibus
 
     subject { described_class.new(project) }
 
-    let(:project_root) { "#{tmp_path}/project/root" }
-    let(:package_dir)  { "#{tmp_path}/package/dir" }
-    let(:staging_dir)  { "#{tmp_path}/staging/dir" }
+    let(:project_root) { File.join(tmp_path, 'project/root') }
+    let(:package_dir)  { File.join(tmp_path, 'package/dir') }
+    let(:staging_dir)  { File.join(tmp_path, 'staging/dir') }
 
     before do
+      # This is here to allow this unit test to run on windows.
+      allow(File).to receive(:expand_path).and_wrap_original do |m, *args|
+        m.call(*args).sub(/^[A-Za-z]:/, '')
+      end
       Config.project_root(project_root)
       Config.package_dir(package_dir)
 
@@ -46,13 +50,13 @@ module Omnibus
 
     describe '#scripts_install_dir' do
       it 'is nested inside the project install_dir' do
-        expect(subject.scripts_install_dir).to eq("#{project.install_dir}/embedded/share/installp")
+        expect(subject.scripts_install_dir).to start_with(project.install_dir)
       end
     end
 
     describe '#scripts_staging_dir' do
       it 'is nested inside the staging_dir' do
-        expect(subject.scripts_staging_dir).to eq("#{staging_dir}#{subject.scripts_install_dir}")
+        expect(subject.scripts_staging_dir).to start_with(staging_dir)
       end
     end
 
@@ -133,12 +137,67 @@ module Omnibus
         end
       end
 
+      context 'when paths with colons/commas are present', if: !windows? do
+        let(:contents) do
+          subject.write_gen_template
+          File.read(gen_file)
+        end
+
+        before do
+          create_file("#{staging_dir}/man3/App::Cpan.3")
+          create_file("#{staging_dir}/comma,file")
+          create_directory("#{staging_dir}/colon::dir/file")
+          create_directory("#{staging_dir}/comma,dir/file")
+        end
+
+        it 'renames colon filenames in the template' do
+          expect(contents).to include("/man3/App____Cpan.3")
+        end
+
+        it 'renames colon directory names in the template' do
+          expect(contents).to include("/colon____dir/file")
+        end
+
+        it 'renames comma filenames in the template' do
+          expect(contents).to include("/comma__file")
+        end
+
+        it 'renames comma directory names in the template' do
+          expect(contents).to include("/comma__dir/file")
+        end
+
+        context 'creates a config script' do
+          it 'when there wasn\'t one provided' do
+            FileUtils.rm_f("#{subject.scripts_staging_dir}/config")
+            subject.write_gen_template
+            expect(File).to exist("#{subject.scripts_staging_dir}/config")
+          end
+
+          it 'when one is provided in the project\'s def' do
+            create_file("#{project_root}/package-scripts/project/config")
+            subject.write_gen_template
+            contents = File.read("#{subject.scripts_staging_dir}/config")
+            expect(contents).to include("mv '/man3/App____Cpan.3' '/man3/App::Cpan.3'")
+          end
+
+          it 'with mv commands for all the renamed files' do
+            subject.write_gen_template
+            contents = File.read("#{subject.scripts_staging_dir}/config")
+            expect(contents).to include("mv '/man3/App____Cpan.3' '/man3/App::Cpan.3'")
+            expect(contents).to include("mv '/comma__file' '/comma,file'")
+            expect(contents).to include("mv '/colon____dir/file' '/colon::dir/file'")
+            expect(contents).to include("mv '/comma__dir/file' '/comma,dir/file'")
+          end
+        end
+      end
+
       context 'when script files are present' do
         before do
           create_file("#{subject.scripts_staging_dir}/preinst")
           create_file("#{subject.scripts_staging_dir}/postinst")
           create_file("#{subject.scripts_staging_dir}/prerm")
           create_file("#{subject.scripts_staging_dir}/postrm")
+          create_file("#{subject.scripts_staging_dir}/config")
         end
 
         it 'writes them into the template' do
@@ -147,8 +206,20 @@ module Omnibus
 
           expect(contents).to include("    Pre-installation Script: #{subject.scripts_staging_dir}/preinst")
           expect(contents).to include("    Post-installation Script: #{subject.scripts_staging_dir}/postinst")
+          expect(contents).to include("    Configuration Script: #{subject.scripts_staging_dir}/config")
           expect(contents).to include("    Pre_rm Script: #{subject.scripts_staging_dir}/prerm")
           expect(contents).to include("    Unconfiguration Script: #{subject.scripts_staging_dir}/postrm")
+        end
+      end
+
+      context 'when the log_level is :debug, it' do
+        before do
+          Omnibus.logger.level = :debug
+        end
+
+        it 'prints the rendered template' do
+          output = capture_logging { subject.write_gen_template }
+          expect(output).to include("Package Name: project")
         end
       end
     end
@@ -157,7 +228,29 @@ module Omnibus
       before do
         allow(subject).to receive(:shellout!)
         allow(Dir).to receive(:chdir) { |_, &b| b.call }
+        create_file(File.join(staging_dir, '.info', "#{project.name}.inventory")) {
+          <<-INVENTORY.gsub(/^\s{12}/, '')
+            /opt/project/version-manifest.txt:
+                      owner = root
+                      group = system
+                      mode = 644
+                      type = FILE
+                      class = apply,inventory,angry-omnibus-toolchain
+                      size = 1906
+                      checksum = "02776    2 "
+          INVENTORY
+        }
+        create_file("#{staging_dir}/file") { "http://goo.gl/TbkO01" }
       end
+
+      it 'chowns the directory' do
+        # A note - the /opt/ here is essentially project.install_dir one level up.
+        # There is nothing magical about 'opt' as a directory.
+        expect(subject).to receive(:shellout!)
+          .with(/chown -R 0:0 #{staging_dir}\/opt$/)
+        subject.create_bff_file
+      end
+
 
       it 'logs a message' do
         output = capture_logging { subject.create_bff_file }
@@ -168,6 +261,17 @@ module Omnibus
         expect(subject).to receive(:shellout!)
           .with(/\/usr\/sbin\/mkinstallp -d/)
         subject.create_bff_file
+      end
+
+      context 'when the log_level is :debug, it' do
+        before do
+          Omnibus.logger.level = :debug
+        end
+
+        it 'prints the inventory file' do
+          output = capture_logging { subject.create_bff_file }
+          expect(output).to match(%r{^/opt/project})
+        end
       end
     end
 

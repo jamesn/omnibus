@@ -101,11 +101,26 @@ module Omnibus
             }
           end
 
-          it 'raises an error' do
-            expect { subject.packages }.to raise_error(InvalidBuildPlatform)
+          it 'prints a warning' do
+            output = capture_logging { subject.packages }
+            expect(output).to include('Could not locate a package for build platform ubuntu-10.04. Publishing will be skipped for: ubuntu-12.04, ubuntu-14.04')
           end
         end
       end
+
+      context 'there are no packages to publish' do
+        before do
+          allow(FileSyncer).to receive(:glob)
+            .with(pattern)
+            .and_return([])
+        end
+
+        it 'prints a warning' do
+          output = capture_logging { subject.packages }
+          expect(output).to include('No packages found, skipping publish')
+        end
+      end
+
     end
 
     describe '#publish' do

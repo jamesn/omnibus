@@ -45,24 +45,6 @@ EOH
     end
   end
 
-  class InvalidBuildPlatform < Error
-    def initialize(build_platform, pattern)
-      @build_platform, @pattern = build_platform, pattern
-    end
-
-    def to_s
-      <<-EOH
-Could not locate a package for build platform:
-
-    #{@build_platform}
-
-using pattern of:
-
-    #{@pattern}
-EOH
-    end
-  end
-
   class MissingRequiredAttribute < Error
     def initialize(instance, name, sample = '<VALUE>')
       @instance, @name, @sample = instance, name, sample
@@ -228,6 +210,18 @@ EOH
     def to_s
       <<-EOH
 The health check failed! Please see above for important information.
+EOH
+    end
+  end
+
+  class ChecksumMissing < Error
+    def initialize(software)
+      super <<-EOH
+Verification for #{software.name} failed due to a missing checksum.
+
+This added security check is used to prevent MITM attacks when downloading the
+remote file. You must specify a checksum for each version of software downloaded
+from a remote location.
 EOH
     end
   end

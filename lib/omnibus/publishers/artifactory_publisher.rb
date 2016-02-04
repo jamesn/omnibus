@@ -38,10 +38,7 @@ module Omnibus
             artifact_for(package).upload(
               repository,
               remote_path_for(package),
-              metadata_for(package).merge(
-                'build.name'   => package.metadata[:name],
-                'build.number' => package.metadata[:version],
-              ),
+              default_properties.merge(metadata_properties_for(package)),
             )
           end
         rescue Artifactory::Error::HTTPError => e
@@ -60,10 +57,12 @@ module Omnibus
         block.call(package) if block
       end
 
-      if packages.empty?
-         log.warn(log_key) { "No packages were uploaded, build object will not be created." }
-      else
-        build_for(packages).save
+      if build_record?
+        if packages.empty?
+          log.warn(log_key) { "No packages were uploaded, build record will not be created." }
+        else
+          build_for(packages).save
+        end
       end
     end
 
@@ -118,11 +117,11 @@ module Omnibus
           name: 'omnibus',
           version: Omnibus::VERSION,
         },
-        properties: {
+        properties: default_properties.merge(
           'omnibus.project' => name,
           'omnibus.version' => manifest.build_version,
           'omnibus.version_manifest' => manifest.to_json,
-        },
+        ),
         modules: [
           {
             # com.getchef:chef-server:12.0.0
@@ -142,6 +141,21 @@ module Omnibus
           }
         ]
       )
+    end
+
+    #
+    # Indicates if an Artifactory build record should be created for the
+    # published set of packages.
+    #
+    # @return [Boolean]
+    #
+    def build_record?
+      # We want to create a build record by default
+      if @options[:build_record].nil?
+        true
+      else
+        @options[:build_record]
+      end
     end
 
     #
@@ -171,8 +185,8 @@ module Omnibus
     #
     # @return [Hash<String, String>]
     #
-    def metadata_for(package)
-      {
+    def metadata_properties_for(package)
+      metadata = {
         'omnibus.project'          => package.metadata[:name],
         'omnibus.platform'         => package.metadata[:platform],
         'omnibus.platform_version' => package.metadata[:platform_version],
@@ -184,6 +198,20 @@ module Omnibus
         'omnibus.sha256'           => package.metadata[:sha256],
         'omnibus.sha512'           => package.metadata[:sha512],
       }
+      metadata.merge!(
+        'build.name'   => package.metadata[:name],
+        'build.number' => package.metadata[:version],
+      ) if build_record?
+      metadata
+    end
+
+    #
+    # Properties to attach to published artifacts (and build record).
+    #
+    # @return [Hash<String, String>]
+    #
+    def default_properties
+      @properties ||= @options[:properties] || {}
     end
 
     #

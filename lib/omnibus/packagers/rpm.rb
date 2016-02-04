@@ -232,13 +232,29 @@ module Omnibus
     end
 
     #
-    # Exclude directories from the spec that are owned by the filesystem package:
+    # Directories owned by the filesystem package:
     # http://fedoraproject.org/wiki/Packaging:Guidelines#File_and_Directory_Ownership
     #
     # @return [Array]
     #
     def filesystem_directories
-      @filesystem_directories ||= IO.readlines(resource_path('filesystem_list')).map! { |dirname| dirname.chomp }
+      @filesystem_directories ||= IO.readlines(resource_path('filesystem_list')).map { |f| f.chomp }
+    end
+
+    #
+    # Mark filesystem directories with ownership and permissions specified in the filesystem package
+    # https://git.fedorahosted.org/cgit/filesystem.git/plain/filesystem.spec
+    #
+    # @return [String]
+    #
+    def mark_filesystem_directories(fsdir)
+      if fsdir.eql?('/') || fsdir.eql?('/usr/lib') || fsdir.eql?('/usr/share/empty')
+        return "%dir %attr(0555,root,root) #{fsdir}"
+      elsif filesystem_directories.include?(fsdir)
+        return "%dir %attr(0755,root,root) #{fsdir}"
+      else
+        return "%dir #{fsdir}"
+      end
     end
 
     #
@@ -266,27 +282,27 @@ module Omnibus
       render_template(resource_path('spec.erb'),
         destination: spec_file,
         variables: {
-          name:           safe_base_package_name,
-          version:        safe_version,
-          iteration:      safe_build_iteration,
-          vendor:         vendor,
-          license:        license,
-          dist_tag:       dist_tag,
-          architecture:   safe_architecture,
-          maintainer:     project.maintainer,
-          homepage:       project.homepage,
-          description:    project.description,
-          priority:       priority,
-          category:       category,
-          conflicts:      project.conflicts,
-          replaces:       project.replaces,
-          dependencies:   project.runtime_dependencies,
-          user:           project.package_user,
-          group:          project.package_group,
-          scripts:        scripts,
-          config_files:   config_files,
-          files:          files,
-          build_dir:      build_dir,
+          name:            safe_base_package_name,
+          version:         safe_version,
+          iteration:       safe_build_iteration,
+          vendor:          vendor,
+          license:         license,
+          dist_tag:        dist_tag,
+          maintainer:      project.maintainer,
+          homepage:        project.homepage,
+          description:     project.description,
+          priority:        priority,
+          category:        category,
+          conflicts:       project.conflicts,
+          replaces:        project.replaces,
+          dependencies:    project.runtime_dependencies,
+          user:            project.package_user,
+          group:           project.package_group,
+          scripts:         scripts,
+          config_files:    config_files,
+          files:           files,
+          build_dir:       build_dir,
+          platform_family: Ohai['platform_family']
         }
       )
     end
@@ -300,6 +316,7 @@ module Omnibus
     #
     def create_rpm_file
       command =  %|fakeroot rpmbuild|
+      command << %| --target #{safe_architecture}|
       command << %| -bb|
       command << %| --buildroot #{staging_dir}/BUILD|
       command << %| --define '_topdir #{staging_dir}'|
@@ -350,12 +367,12 @@ module Omnibus
     #
     def build_filepath(path)
       filepath = rpm_safe('/' + path.gsub("#{build_dir}/", ''))
-      return if config_files.include?(filepath) || filesystem_directories.include?(filepath)
+      return if config_files.include?(filepath)
       full_path = build_dir + filepath.gsub('[%]','%')
       # FileSyncer.glob quotes pathnames that contain spaces, which is a problem on el7
       full_path.gsub!('"', '')
       # Mark directories with the %dir directive to prevent rpmbuild from counting their contents twice.
-      return "%dir #{filepath}" if !File.symlink?(full_path) && File.directory?(full_path)
+      return mark_filesystem_directories(filepath) if !File.symlink?(full_path) && File.directory?(full_path)
       filepath
     end
 
@@ -478,15 +495,26 @@ module Omnibus
       #   http://rpm.org/ticket/56
       #
       if version =~ /\-/
-        converted = version.gsub('-', '~')
-
-        log.warn(log_key) do
-          "Tildes hold special significance in the RPM package versions. " \
-          "They mark a version as lower priority in RPM's version compare " \
-          "logic. We'll replace all dashes (-) with tildes (~) so pre-release" \
-          "versions get sorted earlier then final versions. Converting" \
-          "`#{project.build_version}' to `#{converted}'."
+        if Ohai['platform_family'] == 'wrlinux'
+          converted = version.gsub('-', '_') #WRL has an elderly RPM version
+          log.warn(log_key) do
+            "Omnibus replaces dashes (-) with tildes (~) so pre-release " \
+            "versions get sorted earlier than final versions.  However, the " \
+            "version of rpmbuild on Wind River Linux does not support this. " \
+            "All dashes will be replaced with underscores (_). Converting " \
+            "`#{project.build_version}' to `#{converted}'."
+          end
+        else
+          converted = version.gsub('-', '~')
+          log.warn(log_key) do
+            "Tildes hold special significance in the RPM package versions. " \
+            "They mark a version as lower priority in RPM's version compare " \
+            "logic. We'll replace all dashes (-) with tildes (~) so pre-release" \
+            "versions get sorted earlier then final versions. Converting" \
+            "`#{project.build_version}' to `#{converted}'."
+          end
         end
+
 
         version = converted
       end

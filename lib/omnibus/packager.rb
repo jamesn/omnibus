@@ -38,6 +38,7 @@ module Omnibus
       'debian'   => DEB,
       'fedora'   => RPM,
       'rhel'     => RPM,
+      'wrlinux'  => RPM,
       'aix'      => BFF,
       'solaris2' => Solaris,
       'windows'  => MSI,

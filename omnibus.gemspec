@@ -13,7 +13,7 @@ Gem::Specification.new do |gem|
   gem.description    = gem.summary
   gem.homepage       = 'https://github.com/opscode/omnibus'
 
-  gem.required_ruby_version = '>= 1.9.1'
+  gem.required_ruby_version = '>= 2'
 
   gem.files = `git ls-files`.split($/)
   gem.bindir = 'bin'
@@ -21,13 +21,13 @@ Gem::Specification.new do |gem|
   gem.test_files = gem.files.grep(/^(test|spec|features)\//)
   gem.require_paths = ['lib']
 
-  gem.add_dependency 'chef-sugar',       '~> 3.0'
+  gem.add_dependency 'chef-sugar',       '~> 3.3'
   gem.add_dependency 'cleanroom',        '~> 1.0'
   gem.add_dependency 'mixlib-shellout',  '~> 2.0'
   gem.add_dependency 'mixlib-versioning'
   gem.add_dependency 'ohai',             '~> 8.0'
   gem.add_dependency 'ruby-progressbar', '~> 1.7'
-  gem.add_dependency 'uber-s3'
+  gem.add_dependency 'aws-sdk',          '~> 2'
   gem.add_dependency 'thor',             '~> 0.18'
 
   gem.add_development_dependency 'bundler'
