@@ -14,10 +14,10 @@
 # limitations under the License.
 #
 
-require 'fileutils'
-require 'mixlib/shellout'
-require 'ostruct'
-require 'pathname'
+require "fileutils"
+require "mixlib/shellout"
+require "ostruct"
+require "pathname"
 
 module Omnibus
   class Builder
@@ -111,17 +111,17 @@ module Omnibus
 
       make = options.delete(:bin) ||
         # Prefer gmake on non-windows environments.
-        if !windows? && Omnibus.which('gmake')
+        if !windows? && Omnibus.which("gmake")
           env = options.delete(:env) || {}
-          env = { 'MAKE' => 'gmake' }.merge(env)
+          env = { "MAKE" => "gmake" }.merge(env)
           options[:env] = env
-          'gmake'
+          "gmake"
         else
-          'make'
+          "make"
         end
 
       options[:in_msys_bash] = true
-      make_cmd = ([make] + args).join(' ').strip
+      make_cmd = ([make] + args).join(" ").strip
       command(make_cmd, options)
     end
     expose :make
@@ -162,20 +162,23 @@ module Omnibus
     def configure(*args)
       options = args.last.is_a?(Hash) ? args.pop : {}
 
-      configure = options.delete(:bin) || './configure'
+      configure = options.delete(:bin) || "./configure"
       configure_cmd = [configure]
 
       # Pass the host platform as well. msys is configured for 32-bits even
       # if the actual installed compiler has 64-bit support.
-      configure_cmd << '--host=x86_64-w64-mingw32' if windows? && !windows_arch_i386?
+      if windows?
+        host = windows_arch_i386? ? "i686-w64-mingw32" : "x86_64-w64-mingw32"
+        configure_cmd << "--host=#{host}"
+      end
 
       # Accept a prefix override if provided. Can be set to '' to suppress
       # this functionality.
       prefix = options.delete(:prefix) || "#{install_dir}/embedded"
-      configure_cmd << "--prefix=#{prefix}" if prefix && prefix != ''
+      configure_cmd << "--prefix=#{prefix}" if prefix && prefix != ""
 
       configure_cmd.concat args
-      configure_cmd = configure_cmd.join(' ').strip
+      configure_cmd = configure_cmd.join(" ").strip
 
       options[:in_msys_bash] = true
       command(configure_cmd, options)
@@ -212,7 +215,7 @@ module Omnibus
       plevel = options.delete(:plevel) || 1
       target = options.delete(:target)
 
-      locations, patch_path = find_file('config/patches', source)
+      locations, patch_path = find_file("config/patches", source)
 
       unless patch_path
         raise MissingPatch.new(source, locations)
@@ -288,7 +291,7 @@ module Omnibus
     #
     def ruby(command, options = {})
       build_commands << BuildCommand.new("ruby `#{command}'") do
-        bin = embedded_bin('ruby')
+        bin = embedded_bin("ruby")
         shellout!("#{bin} #{command}", options)
       end
     end
@@ -305,7 +308,7 @@ module Omnibus
     #
     def gem(command, options = {})
       build_commands << BuildCommand.new("gem `#{command}'") do
-        bin = embedded_bin('gem')
+        bin = embedded_bin("gem")
         shellout!("#{bin} #{command}", options)
       end
     end
@@ -325,7 +328,7 @@ module Omnibus
     #
     def bundle(command, options = {})
       build_commands << BuildCommand.new("bundle `#{command}'") do
-        bin = embedded_bin('bundle')
+        bin = embedded_bin("bundle")
         shellout!("#{bin} #{command}", options)
       end
     end
@@ -354,7 +357,7 @@ module Omnibus
         end
 
         bin_dir            = "#{install_dir}/bin"
-        appbundler_bin     = embedded_bin('appbundler')
+        appbundler_bin     = embedded_bin("appbundler")
 
         # Ensure the main bin dir exists
         FileUtils.mkdir_p(bin_dir)
@@ -376,7 +379,7 @@ module Omnibus
     #
     def rake(command, options = {})
       build_commands << BuildCommand.new("rake `#{command}'") do
-        bin = embedded_bin('rake')
+        bin = embedded_bin("rake")
         shellout!("#{bin} #{command}", options)
       end
     end
@@ -400,7 +403,7 @@ module Omnibus
     # @param (see #command)
     # @return (see #command)
     #
-    def block(name = '<Dynamic Ruby block>', &proc)
+    def block(name = "<Dynamic Ruby block>", &proc)
       build_commands << BuildCommand.new(name, &proc)
     end
     expose :block
@@ -442,7 +445,7 @@ module Omnibus
       raise "Missing required option `:source'!" unless source
       raise "Missing required option `:dest'!"   unless dest
 
-      locations, source_path = find_file('config/templates', source)
+      locations, source_path = find_file("config/templates", source)
 
       unless source_path
         raise MissingTemplate.new(source, locations)
@@ -454,7 +457,7 @@ module Omnibus
         render_template(source_path,
           destination: dest,
           mode:        mode,
-          variables:   vars,
+          variables:   vars
         )
       end
     end
@@ -556,7 +559,7 @@ module Omnibus
         Dir.chdir(software.project_dir) do
           files = FileSyncer.glob(source)
           if files.empty?
-            log.warn(log_key) {"no matched files for glob #{command}"}
+            log.warn(log_key) { "no matched files for glob #{command}" }
           else
             files.each do |file|
               FileUtils.cp_r(file, destination, options)
@@ -585,7 +588,7 @@ module Omnibus
         Dir.chdir(software.project_dir) do
           files = FileSyncer.glob(source)
           if files.empty?
-            log.warn(log_key) {"no matched files for glob #{command}"}
+            log.warn(log_key) { "no matched files for glob #{command}" }
           else
             files.each do |file|
               FileUtils.mv(file, destination, options)
@@ -614,7 +617,7 @@ module Omnibus
         Dir.chdir(software.project_dir) do
           files = FileSyncer.glob(source)
           if files.empty?
-            log.warn(log_key) {"no matched files for glob #{command}"}
+            log.warn(log_key) { "no matched files for glob #{command}" }
           else
             files.each do |file|
               FileUtils.ln_s(file, destination, options)
@@ -644,6 +647,35 @@ module Omnibus
     expose :sync
 
     #
+    # Helper method to update config_guess in the software's source
+    # directory.
+    # You should add a dependency on the +config_guess+ software definition if you
+    # want to use this command.
+    # @param [Hash] options
+    #   Supported options are:
+    #     target [String] subdirectory under the software source to copy
+    #       config.guess.to. Default: "."
+    #     install [Array<Symbol>] parts of config.guess to copy.
+    #       Default: [:config_guess, :config_sub]
+    def update_config_guess(target: ".", install: [:config_guess, :config_sub])
+      build_commands << BuildCommand.new("update_config_guess `target: #{target} install: #{install.inspect}'") do
+        config_guess_dir = "#{install_dir}/embedded/lib/config_guess"
+        %w{config.guess config.sub}.each do |c|
+          unless File.exist?(File.join(config_guess_dir, c))
+            raise "Can not find #{c}. Make sure you add a dependency on 'config_guess' in your software definition"
+          end
+        end
+
+        destination = File.join(software.project_dir, target)
+        FileUtils.mkdir_p(destination)
+
+        FileUtils.cp_r("#{config_guess_dir}/config.guess", destination) if install.include? :config_guess
+        FileUtils.cp_r("#{config_guess_dir}/config.sub", destination) if install.include? :config_sub
+      end
+    end
+    expose :update_config_guess
+
+    #
     # @!endgroup
     # --------------------------------------------------
 
@@ -660,9 +692,9 @@ module Omnibus
     # @return [void]
     #
     def build
-      log.info(log_key) { 'Starting build' }
+      log.info(log_key) { "Starting build" }
       shasum # ensure shashum is calculated before build since the build can alter the shasum
-      log.internal(log_key) { "Cached builder checksum before build: #{shasum}"}
+      log.internal(log_key) { "Cached builder checksum before build: #{shasum}" }
       if software.overridden?
         log.info(log_key) do
           "Version overridden from #{software.default_version} to "\
@@ -676,7 +708,7 @@ module Omnibus
         end
       end
 
-      log.info(log_key) { 'Finished build' }
+      log.info(log_key) { "Finished build" }
     end
 
     #
@@ -717,10 +749,6 @@ module Omnibus
 
     def embedded_bin(bin)
       windows_safe_path("#{install_dir}/embedded/bin/#{bin}")
-    end
-
-    def embedded_msys_bin(bin)
-      windows_safe_path("#{install_dir}/embedded/msys/1.0/bin/#{bin}")
     end
 
     #
@@ -767,20 +795,11 @@ module Omnibus
       options = { cwd: software.project_dir }.merge(options)
 
       if options.delete(:in_msys_bash) && windows?
-        # The command needs to be run within an msys bash environment.
-        # TODO: Eventually, have command search through "build time dependencies"
-        # for bash instead.
-        bash_bin = embedded_msys_bin('bash.exe')
-        unless File.exist?(bash_bin)
-          # Fallback to just looking at the embedded_bin directory in case
-          # we're using devkit or older chef-dk.
-          bash_bin = embedded_bin('bash.exe')
-        end
         # Mixlib will handle escaping characters for cmd but our command might
         # contain '. For now, assume that won't happen because I don't know
         # whether this command is going to be played via cmd or through
         # ProcessCreate.
-        command_string = "\"#{bash_bin}\" -c \'#{command_string}\'"
+        command_string = "bash -c \'#{command_string}\'"
       end
 
       # Set the log level to :info so users will see build commands
@@ -830,7 +849,7 @@ module Omnibus
       exceptions = [CommandFailed, CommandTimeout]
 
       begin
-        block.call
+        yield
       rescue *exceptions => e
         if tries <= 0
           raise e
@@ -875,12 +894,12 @@ module Omnibus
     def with_clean_env(&block)
       original = ENV.to_hash
 
-      ENV.delete('_ORIGINAL_GEM_PATH')
-      ENV.delete_if { |k,_| k.start_with?('BUNDLE_') }
-      ENV.delete_if { |k,_| k.start_with?('GEM_') }
-      ENV.delete_if { |k,_| k.start_with?('RUBY') }
+      ENV.delete("_ORIGINAL_GEM_PATH")
+      ENV.delete_if { |k, _| k.start_with?("BUNDLE_") }
+      ENV.delete_if { |k, _| k.start_with?("GEM_") }
+      ENV.delete_if { |k, _| k.start_with?("RUBY") }
 
-      block.call
+      yield
     ensure
       ENV.replace(original.to_hash)
     end

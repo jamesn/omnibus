@@ -14,12 +14,11 @@
 # limitations under the License.
 #
 
-require 'pathname'
+require "pathname"
+require "omnibus/packagers/windows_base"
 
 module Omnibus
-  class Packager::MSI < Packager::Base
-    DEFAULT_TIMESTAMP_SERVERS = ['http://timestamp.digicert.com',
-                                 'http://timestamp.verisign.com/scripts/timestamp.dll']
+  class Packager::MSI < Packager::WindowsBase
     id :msi
 
     setup do
@@ -51,7 +50,7 @@ module Omnibus
       # Source for the custom action is at https://github.com/chef/fastmsi-custom-action
       # The dll will be built separately as part of the custom action build process
       # and made available as a binary for the Omnibus projects to use.
-      copy_file(resource_path('CustomActionFastMsi.CA.dll'), staging_dir) if fast_msi
+      copy_file(resource_path("CustomActionFastMsi.CA.dll"), staging_dir) if fast_msi
     end
 
     build do
@@ -108,10 +107,10 @@ module Omnibus
     #
     def upgrade_code(val = NULL)
       if null?(val)
-        @upgrade_code || raise(MissingRequiredAttribute.new(self, :upgrade_code, '2CD7259C-776D-4DDB-A4C8-6E544E580AA1'))
+        @upgrade_code || raise(MissingRequiredAttribute.new(self, :upgrade_code, "2CD7259C-776D-4DDB-A4C8-6E544E580AA1"))
       else
         unless val.is_a?(String)
-          raise InvalidValue.new(:upgrade_code, 'be a String')
+          raise InvalidValue.new(:upgrade_code, "be a String")
         end
 
         @upgrade_code = val
@@ -138,7 +137,7 @@ module Omnibus
         @parameters || {}
       else
         unless val.is_a?(Hash)
-          raise InvalidValue.new(:parameters, 'be a Hash')
+          raise InvalidValue.new(:parameters, "be a Hash")
         end
 
         @parameters = val
@@ -160,7 +159,7 @@ module Omnibus
     #
     def wix_light_extension(extension)
       unless extension.is_a?(String)
-        raise InvalidValue.new(:wix_light_extension, 'be an String')
+        raise InvalidValue.new(:wix_light_extension, "be an String")
       end
 
       wix_light_extensions << extension
@@ -181,7 +180,7 @@ module Omnibus
     #
     def wix_candle_extension(extension)
       unless extension.is_a?(String)
-        raise InvalidValue.new(:wix_candle_extension, 'be an String')
+        raise InvalidValue.new(:wix_candle_extension, "be an String")
       end
 
       wix_candle_extensions << extension
@@ -200,8 +199,8 @@ module Omnibus
     # @return [TrueClass, FalseClass]
     #   whether we're a bundle or not
     def bundle_msi(val = false)
-      unless (val.is_a?(TrueClass) || val.is_a?(FalseClass))
-        raise InvalidValue.new(:bundle_msi, 'be TrueClass or FalseClass')
+      unless val.is_a?(TrueClass) || val.is_a?(FalseClass)
+        raise InvalidValue.new(:bundle_msi, "be TrueClass or FalseClass")
       end
       @bundle_msi ||= val
     end
@@ -219,78 +218,12 @@ module Omnibus
     # @return [TrueClass, FalseClass]
     #   whether we're building a zip-based MSI or not
     def fast_msi(val = false)
-      unless (val.is_a?(TrueClass) || val.is_a?(FalseClass))
-        raise InvalidValue.new(:fast_msi, 'be TrueClass or FalseClass')
+      unless val.is_a?(TrueClass) || val.is_a?(FalseClass)
+        raise InvalidValue.new(:fast_msi, "be TrueClass or FalseClass")
       end
       @fast_msi ||= val
     end
     expose :fast_msi
-
-    #
-    # Set the signing certificate name
-    #
-    # @example
-    #   signing_identity 'FooCert'
-    #   signing_identity 'FooCert', store: 'BarStore'
-    #
-    # @param [String] thumbprint
-    #   the thumbprint of the certificate in the certificate store
-    # @param [Hash<Symbol, String>] params
-    #   an optional hash that defines the parameters for the singing identity
-    #
-    # @option params [String] :store (My)
-    #   The name of the certificate store which contains the certificate
-    # @option params [Array<String>, String] :timestamp_servers
-    #   A trusted timestamp server or a list of truested timestamp servers to
-    #   be tried. They are tried in the order provided.
-    # @option params [TrueClass, FalseClass] :machine_store (false)
-    #   If set to true, the local machine store will be searched for a valid
-    #   certificate. Otherwise, the current user store is used
-    #
-    #   Setting nothing will default to trying ['http://timestamp.digicert.com',
-    #   'http://timestamp.verisign.com/scripts/timestamp.dll']
-    #
-    # @return [Hash{:thumbprint => String, :store => String, :timestamp_servers => Array[String]}]
-    #
-    def signing_identity(thumbprint= NULL, params = NULL)
-      unless null?(thumbprint)
-        @signing_identity = {}
-        unless thumbprint.is_a?(String)
-          raise InvalidValue.new(:signing_identity, 'be a String')
-        end
-
-        @signing_identity[:thumbprint] = thumbprint
-
-        if !null?(params)
-          unless params.is_a?(Hash)
-            raise InvalidValue.new(:params, 'be a Hash')
-          end
-
-          valid_keys = [:store, :timestamp_servers, :machine_store]
-          invalid_keys = params.keys - valid_keys
-          unless invalid_keys.empty?
-            raise InvalidValue.new(:params, "contain keys from [#{valid_keys.join(', ')}]. "\
-                                   "Found invalid keys [#{invalid_keys.join(', ')}]")
-          end
-
-          if !params[:machine_store].nil? && !(
-             params[:machine_store].is_a?(TrueClass) ||
-             params[:machine_store].is_a?(FalseClass))
-            raise InvalidValue.new(:params, 'contain key :machine_store of type TrueClass or FalseClass')
-          end
-        else
-          params = {}
-        end
-
-        @signing_identity[:store] = params[:store] || 'My'
-        servers = params[:timestamp_servers] || DEFAULT_TIMESTAMP_SERVERS
-        @signing_identity[:timestamp_servers] = [servers].flatten
-        @signing_identity[:machine_store] = params[:machine_store] || false
-      end
-
-      @signing_identity
-    end
-    expose :signing_identity
 
     #
     # Discovers a path to a gem/file included in a gem under the install directory.
@@ -307,15 +240,15 @@ module Omnibus
     #
     def gem_path(glob = NULL)
       unless glob.is_a?(String) || null?(glob)
-        raise InvalidValue.new(:glob, 'be an String')
+        raise InvalidValue.new(:glob, "be an String")
       end
 
       install_path = Pathname.new(project.install_dir)
 
       # Find path in which the Chef gem is installed
-      search_pattern = install_path.join('**', 'gems')
+      search_pattern = install_path.join("**", "gems")
       search_pattern = search_pattern.join(glob) unless null?(glob)
-      file_paths  = Pathname.glob(search_pattern).find
+      file_paths = Pathname.glob(search_pattern).find
 
       raise "Could not find `#{search_pattern}'!" if file_paths.none?
       raise "Multiple possible matches of `#{search_pattern}'! : #{file_paths}" if file_paths.count > 1
@@ -355,7 +288,7 @@ module Omnibus
     # @return [void]
     #
     def write_localization_file
-      render_template(resource_path('localization-en-us.wxl.erb'),
+      render_template(resource_path("localization-en-us.wxl.erb"),
         destination: "#{staging_dir}/localization-en-us.wxl",
         variables: {
           name:          project.package_name,
@@ -371,7 +304,7 @@ module Omnibus
     # @return [void]
     #
     def write_parameters_file
-      render_template(resource_path('parameters.wxi.erb'),
+      render_template(resource_path("parameters.wxi.erb"),
         destination: "#{staging_dir}/parameters.wxi",
         variables: {
           name:            project.package_name,
@@ -379,7 +312,7 @@ module Omnibus
           maintainer:      project.maintainer,
           upgrade_code:    upgrade_code,
           parameters:      parameters,
-          version:         msi_version,
+          version:         windows_package_version,
           display_version: msi_display_version,
         }
       )
@@ -394,7 +327,7 @@ module Omnibus
       paths = []
 
       # Remove C:/
-      install_dir = project.install_dir.split('/')[1..-1].join('/')
+      install_dir = project.install_dir.split("/")[1..-1].join("/")
 
       # Grab all parent paths
       Pathname.new(install_dir).ascend do |path|
@@ -403,24 +336,24 @@ module Omnibus
 
       # Create the hierarchy
       hierarchy = paths.reverse.inject({}) do |hash, path|
-        hash[File.basename(path)] = path.gsub(/[^[:alnum:]]/, '').upcase + 'LOCATION'
+        hash[File.basename(path)] = path.gsub(/[^[:alnum:]]/, "").upcase + "LOCATION"
         hash
       end
 
       # The last item in the path MUST be named PROJECTLOCATION or else space
       # robots will cause permanent damage to you and your family.
-      hierarchy[hierarchy.keys.last] = 'PROJECTLOCATION'
+      hierarchy[hierarchy.keys.last] = "PROJECTLOCATION"
 
       # If the path hierarchy is > 1, the customizable installation directory
       # should default to the second-to-last item in the hierarchy. If the
       # hierarchy is smaller than that, then just use the system drive.
       wix_install_dir = if hierarchy.size > 1
-        hierarchy.to_a[-2][1]
-      else
-        'WINDOWSVOLUME'
-      end
+                          hierarchy.to_a[-2][1]
+                        else
+                          "WINDOWSVOLUME"
+                        end
 
-      render_template(resource_path('source.wxs.erb'),
+      render_template(resource_path("source.wxs.erb"),
         destination: "#{staging_dir}/source.wxs",
         variables: {
           name:          project.package_name,
@@ -439,7 +372,7 @@ module Omnibus
     # @return [void]
     #
     def write_bundle_file
-      render_template(resource_path('bundle.wxs.erb'),
+      render_template(resource_path("bundle.wxs.erb"),
         destination: "#{staging_dir}/bundle.wxs",
         variables: {
           name:            project.package_name,
@@ -447,31 +380,11 @@ module Omnibus
           maintainer:      project.maintainer,
           upgrade_code:    upgrade_code,
           parameters:      parameters,
-          version:         msi_version,
+          version:         windows_package_version,
           display_version: msi_display_version,
           msi:             windows_safe_path(Config.package_dir, msi_name),
         }
       )
-    end
-
-    #
-    # Parse and return the MSI version from the {Project#build_version}.
-    #
-    # A project's +build_version+ looks something like:
-    #
-    #     dev builds => 11.14.0-alpha.1+20140501194641.git.94.561b564
-    #                => 0.0.0+20140506165802.1
-    #
-    #     rel builds => 11.14.0.alpha.1 || 11.14.0
-    #
-    # The MSI version spec expects a version that looks like X.Y.Z.W where
-    # X, Y, Z & W are all 32 bit integers.
-    #
-    # @return [String]
-    #
-    def msi_version
-      versions = project.build_version.split(/[.+-]/)
-      "#{versions[0]}.#{versions[1]}.#{versions[2]}.#{project.build_iteration}"
     end
 
     #
@@ -481,7 +394,7 @@ module Omnibus
     # @return [String]
     #
     def zip_command
-      <<-EOH.split.join(' ').squeeze(' ').strip
+      <<-EOH.split.join(" ").squeeze(" ").strip
       7z a -r
       #{windows_safe_path(staging_dir)}\\#{project.name}.zip
       #{windows_safe_path(project.install_dir)}\\*
@@ -496,7 +409,7 @@ module Omnibus
     #
     def heat_command
       if fast_msi
-        <<-EOH.split.join(' ').squeeze(' ').strip
+        <<-EOH.split.join(" ").squeeze(" ").strip
           heat.exe file "#{project.name}.zip"
           -cg ProjectDir
           -dr INSTALLLOCATION
@@ -504,7 +417,7 @@ module Omnibus
           -out "project-files.wxs"
         EOH
       else
-        <<-EOH.split.join(' ').squeeze(' ').strip
+        <<-EOH.split.join(" ").squeeze(" ").strip
           heat.exe dir "#{windows_safe_path(project.install_dir)}"
             -nologo -srd -sreg -gg -cg ProjectDir
             -dr PROJECTLOCATION
@@ -521,7 +434,7 @@ module Omnibus
     #
     def candle_command(is_bundle: false)
       if is_bundle
-        <<-EOH.split.join(' ').squeeze(' ').strip
+        <<-EOH.split.join(" ").squeeze(" ").strip
         candle.exe
           -nologo
           #{wix_candle_flags}
@@ -531,7 +444,7 @@ module Omnibus
           "#{windows_safe_path(staging_dir, 'bundle.wxs')}"
         EOH
       else
-        <<-EOH.split.join(' ').squeeze(' ').strip
+        <<-EOH.split.join(" ").squeeze(" ").strip
           candle.exe
             -nologo
             #{wix_candle_flags}
@@ -549,7 +462,7 @@ module Omnibus
     #
     def light_command(out_file, is_bundle: false)
       if is_bundle
-        <<-EOH.split.join(' ').squeeze(' ').strip
+        <<-EOH.split.join(" ").squeeze(" ").strip
         light.exe
           -nologo
           -ext WixUIExtension
@@ -561,7 +474,7 @@ module Omnibus
           -out "#{out_file}"
         EOH
       else
-        <<-EOH.split.join(' ').squeeze(' ').strip
+        <<-EOH.split.join(" ").squeeze(" ").strip
           light.exe
             -nologo
             -ext WixUIExtension
@@ -577,7 +490,7 @@ module Omnibus
     #
     # The display version calculated from the {Project#build_version}.
     #
-    # @see #msi_version an explanation of the breakdown
+    # @see #windows_package_version an explanation of the breakdown
     #
     # @return [String]
     #
@@ -627,75 +540,7 @@ module Omnibus
     # @return [String]
     #
     def wix_extension_switches(arr)
-      "#{arr.map {|e| "-ext '#{e}'"}.join(' ')}"
-    end
-
-    def thumbprint
-      signing_identity[:thumbprint]
-    end
-
-    def cert_store_name
-      signing_identity[:store]
-    end
-
-    def timestamp_servers
-      signing_identity[:timestamp_servers]
-    end
-
-    def machine_store?
-      signing_identity[:machine_store]
-    end
-
-    #
-    # Takes a path to a msi and uses the set certificate store and
-    # certificate name
-    #
-    def sign_package(msi_file)
-      cmd = Array.new.tap do |arr|
-        arr << 'signtool.exe'
-        arr << 'sign /v'
-        arr << '/sm' if machine_store?
-        arr << "/s #{cert_store_name}"
-        arr << "/sha1 #{thumbprint}"
-        arr << "/d #{project.package_name}"
-        arr << "\"#{msi_file}\""
-      end
-      shellout!(cmd.join(" "))
-      add_timestamp(msi_file)
-    end
-
-    #
-    # Iterates through available timestamp servers and tries to timestamp
-    # the file. If non succeed, an exception is raised.
-    #
-    def add_timestamp(msi_file)
-      success = false
-      timestamp_servers.each do |ts|
-        success = try_timestamp(msi_file, ts)
-        break if success
-      end
-      raise FailedToTimestampMSI.new if !success
-    end
-
-    def try_timestamp(msi_file, url)
-      timestamp_command = "signtool.exe timestamp -t #{url} \"#{msi_file}\""
-      status = shellout(timestamp_command)
-      if status.exitstatus != 0
-        log.warn(log_key) do
-          <<-EOH.strip
-                Failed to add timestamp with timeserver #{url}
-
-                STDOUT
-                ------
-                #{status.stdout}
-
-                STDERR
-                ------
-                #{status.stderr}
-                EOH
-        end
-      end
-      status.exitstatus == 0
+      "#{arr.map { |e| "-ext '#{e}'" }.join(' ')}"
     end
   end
 end

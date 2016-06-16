@@ -14,14 +14,14 @@
 # limitations under the License.
 #
 
-require 'fileutils'
+require "fileutils"
 
 module Omnibus
   module FileSyncer
     extend self
 
     # Files to be ignored during a directory globbing
-    IGNORED_FILES = %w(. ..).freeze
+    IGNORED_FILES = %w{. ..}.freeze
 
     #
     # Glob across the given pattern, accounting for dotfiles, removing Ruby's
@@ -37,6 +37,31 @@ module Omnibus
       Dir.glob(pattern, File::FNM_DOTMATCH).sort.reject do |file|
         basename = File.basename(file)
         IGNORED_FILES.include?(basename)
+      end
+    end
+
+    #
+    # Glob for all files under a given path/pattern, removing Ruby's
+    # dumb idea to include +'.'+ and +'..'+ as entries.
+    #
+    # @param [String] source
+    #   the path or glob pattern to get all files from
+    #
+    # @option options [String, Array<String>] :exclude
+    #   a file, folder, or globbing pattern of files to ignore when syncing
+    #
+    # @return [Array<String>]
+    #   the list of all files
+    #
+    def all_files_under(source, options = {})
+      excludes = Array(options[:exclude]).map do |exclude|
+        [exclude, "#{exclude}/*"]
+      end.flatten
+
+      source_files = glob(File.join(source, "**/*"))
+      source_files = source_files.reject do |source_file|
+        basename = relative_path_for(source_file, source)
+        excludes.any? { |exclude| File.fnmatch?(exclude, basename, File::FNM_DOTMATCH) }
       end
     end
 
@@ -69,16 +94,7 @@ module Omnibus
           "the `copy' method instead."
       end
 
-      # Reject any files that match the excludes pattern
-      excludes = Array(options[:exclude]).map do |exclude|
-        [exclude, "#{exclude}/*"]
-      end.flatten
-
-      source_files = glob(File.join(source, '**/*'))
-      source_files = source_files.reject do |source_file|
-        basename = relative_path_for(source_file, source)
-        excludes.any? { |exclude| File.fnmatch?(exclude, basename, File::FNM_DOTMATCH) }
-      end
+      source_files = all_files_under(source, options)
 
       # Ensure the destination directory exists
       FileUtils.mkdir_p(destination) unless File.directory?(destination)

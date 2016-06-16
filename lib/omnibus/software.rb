@@ -14,9 +14,9 @@
 # limitations under the License.
 #
 
-require 'fileutils'
-require 'uri'
-require 'omnibus/manifest_entry'
+require "fileutils"
+require "uri"
+require "omnibus/manifest_entry"
 
 module Omnibus
   class Software
@@ -52,6 +52,13 @@ module Omnibus
         end
       end
 
+      #
+      # Reset cached software information.
+      #
+      def reset!
+        @loaded_softwares = nil
+      end
+
       private
 
       #
@@ -84,7 +91,7 @@ module Omnibus
     #
     # @return [Software]
     #
-    def initialize(project, filepath = nil, manifest=nil)
+    def initialize(project, filepath = nil, manifest = nil)
       unless project.is_a?(Project)
         raise ArgumentError,
           "`project' must be a kind of `Omnibus::Project', but was `#{project.class.inspect}'!"
@@ -101,10 +108,10 @@ module Omnibus
 
     def manifest_entry
       @manifest_entry ||= if manifest
-                            log.info(log_key) {"Using user-supplied manifest entry for #{name}"}
+                            log.info(log_key) { "Using user-supplied manifest entry for #{name}" }
                             manifest.entry_for(name)
                           else
-                            log.info(log_key) {"Resolving manifest entry for #{name}"}
+                            log.info(log_key) { "Resolving manifest entry for #{name}" }
                             to_manifest_entry
                           end
     end
@@ -149,7 +156,7 @@ module Omnibus
     #
     def name(val = NULL)
       if null?(val)
-        @name || raise(MissingRequiredAttribute.new(self, :name, 'libxslt'))
+        @name || raise(MissingRequiredAttribute.new(self, :name, "libxslt"))
       else
         @name = val
       end
@@ -175,7 +182,6 @@ module Omnibus
       end
     end
     expose :description
-
 
     #
     # Sets the maintainer of the software.  Currently this is for
@@ -237,6 +243,8 @@ module Omnibus
     #
     # @option val [String] :git (nil)
     #   a git URL
+    # @option val [String] :github (nil)
+    #   a github ORG/REPO pair (e.g. chef/chef) that will be transformed to https://github.com/ORG/REPO.git
     # @option val [String] :url (nil)
     #   general URL
     # @option val [String] :path (nil)
@@ -280,6 +288,8 @@ module Omnibus
             "be a kind of `Hash', but was `#{val.class.inspect}'")
         end
 
+        val = canonicalize_source(val)
+
         extra_keys = val.keys - [
           :git, :path, :url, # fetcher types
           :md5, :sha1, :sha256, :sha512, # hash type - common to all fetchers
@@ -302,7 +312,8 @@ module Omnibus
         @source.merge!(val)
       end
 
-      apply_overrides(:source)
+      override = canonicalize_source(overrides[:source])
+      apply_overrides(:source, override)
     end
     expose :source
 
@@ -328,6 +339,46 @@ module Omnibus
     expose :default_version
 
     #
+    # Set or retrieve the {#license} of the software to build.
+    #
+    # @example
+    #   license 'Apache 2.0'
+    #
+    # @param [String] val
+    #   the license to set for the software.
+    #
+    # @return [String]
+    #
+    def license(val = NULL)
+      if null?(val)
+        @license || "Unspecified"
+      else
+        @license = val
+      end
+    end
+    expose :license
+
+    #
+    # Set or retrieve the location of a {#license_file}
+    # of the software.  It can either be a relative path inside
+    # the source package or a URL.
+    #
+    #
+    # @example
+    #   license_file 'LICENSES/artistic.txt'
+    #
+    # @param [String] val
+    #   the location of the license file for the software.
+    #
+    # @return [String]
+    #
+    def license_file(file)
+      license_files << file
+      license_files.dup
+    end
+    expose :license_file
+
+    #
     # Evaluate a block only if the version matches.
     #
     # @example
@@ -348,10 +399,29 @@ module Omnibus
       if block_given?
         if val.equal?(NULL)
           raise InvalidValue.new(:version,
-            'pass a block when given a version argument')
+            "pass a block when given a version argument")
         else
           if val == final_version
-            block.call
+            #
+            # Unfortunately we need to make a specific logic here for license files.
+            # We support multiple calls `license_file` and we support overriding the
+            # license files inside a version block. We can not differentiate whether
+            # `license_file` is being called from a version block or not. So we need
+            # to check if the license files are being overridden during the call to
+            # block.
+            #
+            # If so we use the new set, otherwise we restore the old license files.
+            #
+            current_license_files = @license_files
+            @license_files = []
+
+            yield
+
+            new_license_files = @license_files
+
+            if new_license_files.empty?
+              @license_files = current_license_files
+            end
           end
         end
       end
@@ -413,7 +483,7 @@ module Omnibus
     #
     def relative_path(val = NULL)
       if null?(val)
-        @relative_path || '.'
+        @relative_path || "."
       else
         @relative_path = val
       end
@@ -532,7 +602,7 @@ module Omnibus
       env ||= {}
       opts ||= {}
       compiler_flags =
-        case Ohai['platform']
+        case Ohai["platform"]
         when "aix"
           {
             "CC" => "xlc_r -q64",
@@ -549,24 +619,36 @@ module Omnibus
             "CFLAGS" => "-I#{install_dir}/embedded/include -O2",
           }
         when "solaris2"
-          {
-            # this override is due to a bug in libtool documented here:
-            # http://lists.gnu.org/archive/html/bug-libtool/2005-10/msg00004.html
-            "CC" => "gcc -static-libgcc",
-            "LDFLAGS" => "-R#{install_dir}/embedded/lib -L#{install_dir}/embedded/lib -static-libgcc",
-            "CFLAGS" => "-I#{install_dir}/embedded/include",
-          }
+          if platform_version.satisfies?("<= 5.10")
+            solaris_flags = {
+              # this override is due to a bug in libtool documented here:
+              # http://lists.gnu.org/archive/html/bug-libtool/2005-10/msg00004.html
+              "CC" => "gcc -static-libgcc",
+              "LDFLAGS" => "-R#{install_dir}/embedded/lib -L#{install_dir}/embedded/lib -static-libgcc",
+              "CFLAGS" => "-I#{install_dir}/embedded/include",
+            }
+          elsif platform_version.satisfies?(">= 5.11")
+            solaris_flags = {
+              "CC" => "gcc -m64 -static-libgcc",
+              "LDFLAGS" => "-Wl,-rpath,#{install_dir}/embedded/lib -L#{install_dir}/embedded/lib -static-libgcc",
+              "CFLAGS" => "-I#{install_dir}/embedded/include -O2",
+            }
+          end
+          solaris_flags
         when "freebsd"
           freebsd_flags = {
             "LDFLAGS" => "-L#{install_dir}/embedded/lib",
             "CFLAGS" => "-I#{install_dir}/embedded/include -O2",
           }
+          # Enable gcc version 4.9 if it is available
+          if (Ohai["os_version"].to_i <= 903000) && which("gcc49")
+            freebsd_flags["CC"] = "gcc49"
+            freebsd_flags["CXX"] = "g++49"
+          end
           # Clang became the default compiler in FreeBSD 10+
-          if Ohai['os_version'].to_i >= 1000024
-            freebsd_flags.merge!(
-              "CC" => "clang",
-              "CXX" => "clang++",
-            )
+          if Ohai["os_version"].to_i >= 1000024
+            freebsd_flags["CC"] = "clang"
+            freebsd_flags["CXX"] = "clang++"
           end
           freebsd_flags
         when "windows"
@@ -574,8 +656,16 @@ module Omnibus
           opt_flag = windows_arch_i386? ? "-march=i686" : "-march=x86-64"
           {
             "LDFLAGS" => "-L#{install_dir}/embedded/lib #{arch_flag}",
-            # If we're happy with these flags, enable SSE for other platforms running x86 too.
-            "CFLAGS" => "-I#{install_dir}/embedded/include #{arch_flag} -O3 -mfpmath=sse -msse2 #{opt_flag}"
+            # We do not wish to enable SSE even though we target i686 because
+            # of a stack alignment issue with some libraries. We have not
+            # exactly ascertained the cause but some compiled library/binary
+            # violates gcc's assumption that the stack is going to be 16-byte
+            # aligned which is just fine as long as one is pushing 32-bit
+            # values from general purpose registers but stuff hits the fan as
+            # soon as gcc emits aligned SSE xmm register spills which generate
+            # GPEs and terminate the application very rudely with very little
+            # to debug with.
+            "CFLAGS" => "-I#{install_dir}/embedded/include #{arch_flag} -O3 #{opt_flag}",
           }
         else
           {
@@ -589,12 +679,8 @@ module Omnibus
       # optional flag.
       if opts[:bfd_flags] && windows?
         bfd_target = windows_arch_i386? ? "pe-i386" : "pe-x86-64"
-        compiler_flags.merge!(
-          {
-            "RCFLAGS" => "--target=#{bfd_target}",
-            "ARFLAGS" => "--target=#{bfd_target}",
-          }
-        )
+        compiler_flags["RCFLAGS"] = "--target=#{bfd_target}"
+        compiler_flags["ARFLAGS"] = "--target=#{bfd_target}"
       end
       # merge LD_RUN_PATH into the environment.  most unix distros will fall
       # back to this if there is no LDFLAGS passed to the linker that sets
@@ -604,27 +690,26 @@ module Omnibus
       # better.  in that case LD_RUN_PATH will probably survive whatever
       # edits the configure script does
       extra_linker_flags = {
-        "LD_RUN_PATH" => "#{install_dir}/embedded/lib"
+        "LD_RUN_PATH" => "#{install_dir}/embedded/lib",
       }
 
       if solaris2?
-        # in order to provide compatibility for earlier versions of libc on solaris 10,
-        # we need to specify a mapfile that restricts the version of system libraries
-        # used. See http://docs.oracle.com/cd/E23824_01/html/819-0690/chapter5-1.html
-        # for more information
-        # use the mapfile if it exists, otherwise ignore it
         ld_options = "-R#{install_dir}/embedded/lib"
-        mapfile_path = File.expand_path(Config.solaris_linker_mapfile, Config.project_root)
-        ld_options  << " -M #{mapfile_path}" if File.exist?(mapfile_path)
+
+        if platform_version.satisfies?("<= 5.10")
+          # in order to provide compatibility for earlier versions of libc on solaris 10,
+          # we need to specify a mapfile that restricts the version of system libraries
+          # used. See http://docs.oracle.com/cd/E23824_01/html/819-0690/chapter5-1.html
+          # for more information
+          # use the mapfile if it exists, otherwise ignore it
+          mapfile_path = File.expand_path(Config.solaris_linker_mapfile, Config.project_root)
+          ld_options << " -M #{mapfile_path}" if File.exist?(mapfile_path)
+        end
 
         # solaris linker can also use LD_OPTIONS, so we throw the kitchen sink against
         # the linker, to find every way to make it use our rpath. This is also required
         # to use the aforementioned mapfile.
-        extra_linker_flags.merge!(
-          {
-            "LD_OPTIONS" => ld_options
-          }
-        )
+        extra_linker_flags["LD_OPTIONS"] = ld_options
       end
 
       env.merge(compiler_flags).
@@ -632,10 +717,10 @@ module Omnibus
         # always want to favor pkg-config from embedded location to not hose
         # configure scripts which try to be too clever and ignore our explicit
         # CFLAGS and LDFLAGS in favor of pkg-config info
-        merge({"PKG_CONFIG_PATH" => "#{install_dir}/embedded/lib/pkgconfig"}).
+        merge({ "PKG_CONFIG_PATH" => "#{install_dir}/embedded/lib/pkgconfig" }).
         # Set default values for CXXFLAGS and CPPFLAGS.
-        merge('CXXFLAGS' => compiler_flags['CFLAGS']).
-        merge('CPPFLAGS' => compiler_flags['CFLAGS'])
+        merge("CXXFLAGS" => compiler_flags["CFLAGS"]).
+        merge("CPPFLAGS" => compiler_flags["CFLAGS"])
     end
     expose :with_standard_compiler_flags
 
@@ -671,7 +756,7 @@ module Omnibus
       path_values = Array(paths)
       path_values << ENV[path_key]
 
-      separator = File::PATH_SEPARATOR || ':'
+      separator = File::PATH_SEPARATOR || ":"
       path_values.join(separator)
     end
     expose :prepend_path
@@ -727,7 +812,9 @@ module Omnibus
                                    source_type: source_type,
                                    described_version: version,
                                    locked_version: Fetcher.resolve_version(version, source),
-                                   locked_source: source})
+                                   locked_source: source,
+                                   license: license,
+      })
     end
 
     #
@@ -768,6 +855,17 @@ module Omnibus
     #
     def whitelist_files
       @whitelist_files ||= []
+    end
+
+    #
+    # The list of license files for this software
+    #
+    # @see #license_file
+    #
+    # @return [Array<String>]
+    #
+    def license_files
+      @license_files ||= []
     end
 
     #
@@ -836,18 +934,18 @@ module Omnibus
     # Returns the version to be used in cache.
     def version_for_cache
       @version_for_cache ||= if fetcher.version_for_cache
-        fetcher.version_for_cache
-      elsif version
-        version
-      else
-        log.warn(log_key) do
-          "No version given! This is probably a bad thing. I am going to " \
-          "assume the version `0.0.0', but that is most certainly not your " \
-          "desired behavior. If git caching seems off, this is probably why."
-        end
+                               fetcher.version_for_cache
+                             elsif version
+                               version
+                             else
+                               log.warn(log_key) do
+                                 "No version given! This is probably a bad thing. I am going to " \
+                                 "assume the version `0.0.0', but that is most certainly not your " \
+                                 "desired behavior. If git caching seems off, this is probably why."
+                               end
 
-        '0.0.0'
-      end
+                               "0.0.0"
+                             end
     end
 
     #
@@ -869,7 +967,7 @@ module Omnibus
     #
     def fetcher
       @fetcher ||=
-        if source_type == :url && File.basename(source[:url], '?*').end_with?(*NetFetcher::ALL_EXTENSIONS)
+        if source_type == :url && File.basename(source[:url], "?*").end_with?(*NetFetcher::ALL_EXTENSIONS)
           Fetcher.fetcher_class_for_source(self.source).new(manifest_entry, fetch_dir, build_dir)
         else
           Fetcher.fetcher_class_for_source(self.source).new(manifest_entry, project_dir, build_dir)
@@ -967,12 +1065,12 @@ module Omnibus
         update_with_string(digest, builder.shasum)
         update_with_string(digest, name)
         update_with_string(digest, version_for_cache)
-        update_with_string(digest, JSON.fast_generate(overrides))
+        update_with_string(digest, FFI_Yajl::Encoder.encode(overrides))
 
         if filepath && File.exist?(filepath)
           update_with_file_contents(digest, filepath)
         else
-          update_with_string(digest, '<DYNAMIC>')
+          update_with_string(digest, "<DYNAMIC>")
         end
 
         digest.hexdigest
@@ -1005,10 +1103,10 @@ module Omnibus
       # modify ENV['Path'] then it ignores that.  So, we scan ENV and returns the first
       # one that we find.
       #
-      if Ohai['platform'] == 'windows'
+      if Ohai["platform"] == "windows"
         ENV.keys.grep(/\Apath\Z/i).first
       else
-        'PATH'
+        "PATH"
       end
     end
 
@@ -1016,15 +1114,27 @@ module Omnibus
     # Apply overrides in the @overrides hash that mask instance variables
     # that are set by parsing the DSL
     #
-    def apply_overrides(attr)
+    def apply_overrides(attr, override = overrides[attr])
       val = instance_variable_get(:"@#{attr}")
-      if val.is_a?(Hash) || overrides[attr].is_a?(Hash)
+      if val.is_a?(Hash) || override.is_a?(Hash)
         val ||= {}
-        override = overrides[attr] || {}
+        override ||= {}
         val.merge(override)
       else
-        overrides[attr] || val
+        override || val
       end
+    end
+
+    #
+    # Transform github -> git in source
+    #
+    def canonicalize_source(source)
+      if source.is_a?(Hash) && source[:github]
+        source = source.dup
+        source[:git] = "https://github.com/#{source[:github]}.git"
+        source.delete(:github)
+      end
+      source
     end
 
     #
@@ -1039,7 +1149,7 @@ module Omnibus
 
       if Config.use_git_caching
         git_cache.incremental
-        log.info(log_key) { 'Dirtied the cache' }
+        log.info(log_key) { "Dirtied the cache" }
       end
     end
 

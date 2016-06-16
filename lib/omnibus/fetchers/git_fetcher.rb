@@ -46,9 +46,9 @@ module Omnibus
     #   git checkout/clean.
     #
     def clean
-      log.info(log_key) { 'Cleaning existing clone' }
+      log.info(log_key) { "Cleaning existing clone" }
       git_checkout
-      git('clean -fdx')
+      git("clean -fdx")
       true
     end
 
@@ -114,7 +114,7 @@ module Omnibus
     # @return [true, false]
     #
     def dir_empty?(dir)
-      Dir.entries(dir).reject {|d| ['.', '..'].include?(d) }.empty?
+      Dir.entries(dir).reject { |d| [".", ".."].include?(d) }.empty?
     end
 
     #
@@ -154,6 +154,7 @@ module Omnibus
       # default when a sha1 is provided).  git older than 1.7.5 doesn't
       # support the --detach flag.
       git("checkout #{resolved_version} -f -q")
+      git("submodule update --recursive") if clone_submodules?
     end
 
     #
@@ -163,7 +164,7 @@ module Omnibus
     #
     def git_fetch
       fetch_cmd = "fetch #{source_url} #{described_version}"
-      fetch_cmd << ' --recurse-submodules=on-demand' if clone_submodules?
+      fetch_cmd << " --recurse-submodules=on-demand" if clone_submodules?
       git(fetch_cmd)
     end
 
@@ -173,7 +174,7 @@ module Omnibus
     # @return [String]
     #
     def current_revision
-      cmd = git('rev-parse HEAD')
+      cmd = git("rev-parse HEAD")
       cmd.stdout.strip
     rescue CommandFailed
       log.debug(log_key) { "unable to determine current revision" }
@@ -187,7 +188,7 @@ module Omnibus
     #
     def contains_revision?(rev)
       cmd = git("cat-file -t #{rev}")
-      cmd.stdout.strip == 'commit'
+      cmd.stdout.strip == "commit"
     rescue CommandFailed
       log.debug(log_key) { "unable to determine presence of commit #{rev}" }
       false
@@ -196,13 +197,20 @@ module Omnibus
     #
     # Execute the given git command, inside the +project_dir+.
     #
+    # autcrlf is a hack to help support windows and posix clients using the
+    # same repository but canonicalizing files as they are committed to the
+    # repo but converting line endings when they are actually checked out
+    # into a working tree. We do not want to change the on-disk representation
+    # of our sources regardless of the platform we are building on unless
+    # explicitly asked for. Hence, we disable autocrlf.
+    #
     # @see Util#shellout!
     #
     # @return [Mixlib::ShellOut]
     #   the shellout object
     #
     def git(command)
-      shellout!("git #{command}", cwd: project_dir)
+      shellout!("git -c core.autocrlf=false #{command}", cwd: project_dir)
     end
 
     # Class methods
@@ -222,7 +230,7 @@ module Omnibus
         # Only when the service is specifically configured with
         # uploadpack.allowReachableSHA1InWant is there any guarantee that it
         # considers "naked" wants.
-        log.warn(log_key) { 'git fetch on a sha1 is not guaranteed to work' }
+        log.warn(log_key) { "git fetch on a sha1 is not guaranteed to work" }
         log.warn(log_key) { "Specify a ref name instead of #{ref} on #{source}" }
         ref
       else
@@ -252,7 +260,7 @@ module Omnibus
       # allows us to return the SHA of the tagged commit for annotated
       # tags. We take care to only return exact matches in
       # process_remote_list.
-      remote_list = shellout!("git ls-remote \"#{source[:git]}\" #{ref}*").stdout
+      remote_list = shellout!("git ls-remote \"#{source[:git]}\" \"#{ref}*\"").stdout
       commit_ref = dereference_annotated_tag(remote_list, ref)
 
       unless commit_ref
