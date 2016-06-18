@@ -160,7 +160,7 @@ module Omnibus
     def download
       log.warn(log_key) { source[:warning] } if source.key?(:warning)
 
-      options = {}
+      options = source[:options] || {}
 
       if source[:unsafe]
         log.warn(log_key) { "Permitting unsafe redirects!" }
