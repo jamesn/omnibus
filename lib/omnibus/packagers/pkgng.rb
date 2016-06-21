@@ -13,17 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-=begin
-pre-install
-post-install
-install
-pre-deinstall
-post-deinstall
-deinstall
-pre-upgrade
-post-upgrade
-upgrade
-=end
+
+require 'json'
 
 module Omnibus
   class Packager::PKGNG < Packager::Base
