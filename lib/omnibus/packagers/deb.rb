@@ -80,10 +80,10 @@ module Omnibus
     #
     def vendor(val = NULL)
       if null?(val)
-        @vendor || 'Omnibus <omnibus@getchef.com>'
+        @vendor || "Omnibus <omnibus@getchef.com>"
       else
         unless val.is_a?(String)
-          raise InvalidValue.new(:vendor, 'be a String')
+          raise InvalidValue.new(:vendor, "be a String")
         end
 
         @vendor = val
@@ -105,10 +105,10 @@ module Omnibus
     #
     def license(val = NULL)
       if null?(val)
-        @license || 'unknown'
+        @license || project.license
       else
         unless val.is_a?(String)
-          raise InvalidValue.new(:license, 'be a String')
+          raise InvalidValue.new(:license, "be a String")
         end
 
         @license = val
@@ -130,10 +130,10 @@ module Omnibus
     #
     def priority(val = NULL)
       if null?(val)
-        @priority || 'extra'
+        @priority || "extra"
       else
         unless val.is_a?(String)
-          raise InvalidValue.new(:priority, 'be a String')
+          raise InvalidValue.new(:priority, "be a String")
         end
 
         @priority = val
@@ -155,10 +155,10 @@ module Omnibus
     #
     def section(val = NULL)
       if null?(val)
-        @section || 'misc'
+        @section || "misc"
       else
         unless val.is_a?(String)
-          raise InvalidValue.new(:section, 'be a String')
+          raise InvalidValue.new(:section, "be a String")
         end
 
         @section = val
@@ -187,7 +187,7 @@ module Omnibus
     # @return [String]
     #
     def debian_dir
-      @debian_dir ||= File.join(staging_dir, 'DEBIAN')
+      @debian_dir ||= File.join(staging_dir, "DEBIAN")
     end
 
     #
@@ -197,8 +197,8 @@ module Omnibus
     # @return [void]
     #
     def write_control_file
-      render_template(resource_path('control.erb'),
-        destination: File.join(debian_dir, 'control'),
+      render_template(resource_path("control.erb"),
+        destination: File.join(debian_dir, "control"),
         variables: {
           name:           safe_base_package_name,
           version:        safe_version,
@@ -227,8 +227,8 @@ module Omnibus
     def write_conffiles_file
       return if project.config_files.empty?
 
-      render_template(resource_path('conffiles.erb'),
-        destination: File.join(debian_dir, 'conffiles'),
+      render_template(resource_path("conffiles.erb"),
+        destination: File.join(debian_dir, "conffiles"),
         variables: {
           config_files: project.config_files,
         }
@@ -242,12 +242,14 @@ module Omnibus
     # @return [void]
     #
     def write_scripts
-      %w(preinst postinst prerm postrm).each do |script|
+      %w{preinst postinst prerm postrm}.each do |script|
         path = File.join(project.package_scripts_path, script)
 
         if File.file?(path)
-          log.debug(log_key) { "Adding script `#{script}' to `#{debian_dir}'" }
+          log.debug(log_key) { "Adding script `#{script}' to `#{debian_dir}' from #{path}" }
           copy_file(path, debian_dir)
+          log.debug(log_key) { "SCRIPT FILE:  #{debian_dir}/#{script}" }
+          FileUtils.chmod(0755, File.join(debian_dir, script))
         end
       end
     end
@@ -261,16 +263,16 @@ module Omnibus
     def write_md5_sums
       path = "#{staging_dir}/**/*"
       hash = FileSyncer.glob(path).inject({}) do |hash, path|
-        if File.file?(path) && !File.symlink?(path)
-          relative_path = path.gsub("#{staging_dir}/", '')
+        if File.file?(path) && !File.symlink?(path) && !(File.dirname(path) == debian_dir)
+          relative_path = path.gsub("#{staging_dir}/", "")
           hash[relative_path] = digest(path, :md5)
         end
 
         hash
       end
 
-      render_template(resource_path('md5sums.erb'),
-        destination: File.join(debian_dir, 'md5sums'),
+      render_template(resource_path("md5sums.erb"),
+        destination: File.join(debian_dir, "md5sums"),
         variables: {
           md5sums: hash,
         }
@@ -326,7 +328,7 @@ module Omnibus
       if project.package_name =~ /\A[a-z0-9\.\+\-]+\z/
         project.package_name.dup
       else
-        converted = project.package_name.downcase.gsub(/[^a-z0-9\.\+\-]+/, '-')
+        converted = project.package_name.downcase.gsub(/[^a-z0-9\.\+\-]+/, "-")
 
         log.warn(log_key) do
           "The `name' component of Debian package names can only include " \
@@ -359,7 +361,7 @@ module Omnibus
       version = project.build_version.dup
 
       if version =~ /\-/
-        converted = version.gsub('-', '~')
+        converted = version.tr("-", "~")
 
         log.warn(log_key) do
           "Dashes hold special significance in the Debian package versions. " \
@@ -376,7 +378,7 @@ module Omnibus
       if version =~ /\A[a-zA-Z0-9\.\+\:\~]+\z/
         version
       else
-        converted = version.gsub(/[^a-zA-Z0-9\.\+\:\~]+/, '_')
+        converted = version.gsub(/[^a-zA-Z0-9\.\+\:\~]+/, "_")
 
         log.warn(log_key) do
           "The `version' component of Debian package names can only include " \
@@ -395,25 +397,7 @@ module Omnibus
     # @return [String]
     #
     def safe_architecture
-      case Ohai['kernel']['machine']
-      when 'x86_64'
-        'amd64'
-      when 'i686'
-        'i386'
-      when /armv\dl/
-        if Ohai['platform'] == 'raspbian' || Ohai['platform'] == 'ubuntu'
-          'armhf'
-        else
-          Ohai['kernel']['machine']
-        end
-      when 'ppc64le'
-        # Debian prefers to use ppc64el for little endian architecture name 
-        # where as others like gnutools/rhel use ppc64le( note the last 2 chars)
-        # see http://linux.debian.ports.powerpc.narkive.com/8eeWSBtZ/switching-ppc64el-port-name-to-ppc64le
-        'ppc64el'  #dpkg --print-architecture = ppc64el
-      else
-        Ohai['kernel']['machine']
-      end
+      @safe_architecture ||= shellout!("dpkg --print-architecture").stdout.split("\n").first || "noarch"
     end
   end
 end

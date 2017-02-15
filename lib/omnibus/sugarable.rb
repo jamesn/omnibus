@@ -14,22 +14,23 @@
 # limitations under the License.
 #
 
-require 'chef/sugar/architecture'
-require 'chef/sugar/cloud'
-# NOTE: We cannot include the constraints library because of the conflicting
-# +version+ attribute would screw things up. You can still use the
-# +Chef::Sugar::Constraint.version('1.2.3') for comparing versions.
-#
-# require 'chef/sugar/constraints'
-require 'chef/sugar/ip'
-require 'chef/sugar/platform'
-require 'chef/sugar/platform_family'
-require 'chef/sugar/ruby'
-require 'chef/sugar/shell'
-require 'chef/sugar/vagrant'
+require "chef/sugar/architecture"
+require "chef/sugar/cloud"
+require "chef/sugar/constraints"
+require "chef/sugar/ip"
+require "chef/sugar/platform"
+require "chef/sugar/platform_family"
+require "chef/sugar/ruby"
+require "chef/sugar/shell"
+require "chef/sugar/vagrant"
 
 module Omnibus
   module Sugarable
+    def self.extended(base)
+      base.send(:extend, Chef::Sugar::DSL)
+      base.send(:extend, Omnibus::Sugar)
+    end
+
     def self.included(base)
       base.send(:include, Chef::Sugar::DSL)
       base.send(:include, Omnibus::Sugar)
@@ -41,7 +42,7 @@ module Omnibus
         end
 
         # Make all the common "sugars" available in the cleanroom (DSL)
-         Omnibus::Sugar.instance_methods.each do |instance_method|
+        Omnibus::Sugar.instance_methods.each do |instance_method|
           base.send(:expose, instance_method)
         end
       end
@@ -64,7 +65,7 @@ module Omnibus
     # Returns whether the Windows build target is 32-bit (x86).
     # If this returns false, the target is x64. Itanium is not supported.
     def windows_arch_i386?
-      Config.windows_arch == :x86
+      Config.windows_arch.to_sym == :x86
     end
   end
 end

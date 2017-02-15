@@ -16,6 +16,8 @@
 
 module Omnibus
   class Publisher
+    include Digestable
+
     class << self
       #
       # Shortcut class method for creating a new instance of this class and
@@ -74,7 +76,7 @@ module Omnibus
           # the platform map is a simple hash with publish to build platform mappings
           @options[:platform_mappings].each_pair do |build_platform, publish_platforms|
             # Splits `ubuntu-12.04` into `ubuntu` and `12.04`
-            build_platform, build_platform_version = build_platform.rpartition('-') - %w( - )
+            build_platform, build_platform_version = build_platform.rpartition("-") - %w{ - }
 
             # locate the package for the build platform
             packages = build_packages.select do |p|
@@ -82,10 +84,15 @@ module Omnibus
                 p.metadata[:platform_version] == build_platform_version
             end
 
-            raise InvalidBuildPlatform.new("#{build_platform}-#{build_platform_version}", @pattern) if packages.empty?
+            if packages.empty?
+              log.warn(log_key) do
+                "Could not locate a package for build platform #{build_platform}-#{build_platform_version}. " \
+                "Publishing will be skipped for: #{publish_platforms.join(', ')}"
+              end
+            end
 
             publish_platforms.each do |publish_platform|
-              publish_platform, publish_platform_version = publish_platform.rpartition('-') - %w( - )
+              publish_platform, publish_platform_version = publish_platform.rpartition("-") - %w{ - }
 
               packages.each do |p|
                 # create a copy of our package before mucking with its metadata
@@ -105,6 +112,10 @@ module Omnibus
           end
         else
           publish_packages.concat(build_packages)
+        end
+
+        if publish_packages.empty?
+          log.info(log_key) { "No packages found, skipping publish" }
         end
 
         publish_packages
