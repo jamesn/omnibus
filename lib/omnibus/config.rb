@@ -471,6 +471,12 @@ module Omnibus
       :x86
     end
 
+    # Flag specifying whether the project should be built with FIPS
+    # compatability or not.
+    #
+    # @return [true, false]
+    default(:fips_mode, false)
+
     # --------------------------------------------------
     # @!endgroup
     #
@@ -513,6 +519,12 @@ module Omnibus
     #
     # @return [true, false]
     default(:fatal_licensing_warnings, false)
+
+    # Fail the build or warn when build encounters a transitive dependency
+    # licensing warning.
+    #
+    # @return [true, false]
+    default(:fatal_transitive_dependency_licensing_warnings, false)
 
     # --------------------------------------------------
     # @!endgroup

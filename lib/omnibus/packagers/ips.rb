@@ -28,6 +28,7 @@ module Omnibus
       destination = File.join(source_dir, project.install_dir)
       FileSyncer.sync(project.install_dir, destination, exclude: exclusions)
       write_transform_file
+      write_versionlock_file
     end
 
     build do
@@ -81,7 +82,7 @@ module Omnibus
     # @see Base#package_name
     #
     def package_name
-      "#{safe_base_package_name}.p5p"
+      "#{safe_base_package_name}-#{project.build_version}-#{project.build_iteration}.#{safe_architecture}.p5p"
     end
 
     #
@@ -102,6 +103,15 @@ module Omnibus
     #
     def transform_file
       @transform_file ||= File.join(staging_dir, "doc-transform")
+    end
+
+    #
+    # The full path to the version-lock file on disk.
+    #
+    # @return [String]
+    #
+    def versionlock_file
+      @versionlock_file ||= File.join(staging_dir, "version-lock")
     end
 
     #
@@ -178,6 +188,17 @@ module Omnibus
     end
 
     #
+    # A version-lock rule that `pkgmogrify' will apply to at the end of package
+    # manifest.
+    #
+    # @return [void]
+    #
+    def write_versionlock_file
+      transform_str = "<transform pkg depend -> default facet.version-lock.*> false>"
+      File.write("#{staging_dir}/version-lock", transform_str)
+    end
+
+    #
     # A set of transform rules that `pkgmogrify' will apply to the package
     # manifest.
     #
@@ -188,6 +209,24 @@ module Omnibus
         destination: transform_file,
         variables: {
           pathdir: project.install_dir.split("/")[1],
+        }
+      )
+    end
+
+    #
+    # A set of symbolic links to installed commands that
+    #`pkgmogrify' will apply to the package manifest. Is called only when
+    # symlinks.erb template exists
+    # The resource exists locally. For example for project omnibus-toolchain
+    # resource_path("symlinks.erb") #=>
+    # {"/path/to/omnibus-toolchain/resources/omnibus-toolchain/ips/symlinks.erb"}
+    #
+    # @return [String]
+    #
+    def render_symlinks
+      render_template_content(resource_path("symlinks.erb"),
+        {
+          projectdir: project.install_dir,
         }
       )
     end
@@ -210,6 +249,13 @@ module Omnibus
           arch:              safe_architecture,
         }
       )
+
+      # Append the contents of symlinks.erb if it exists
+      if File.exists?(resource_path("symlinks.erb"))
+        File.open(pkg_metadata_file, "a") do |symlink|
+          symlink.write(render_symlinks)
+        end
+      end
 
       # Print the full contents of the rendered template file to generate package contents
       log.debug(log_key) { "Rendered Template:\n" + File.read(pkg_metadata_file) }
@@ -234,6 +280,7 @@ module Omnibus
       shellout!("pkgdepend generate -md #{source_dir} #{pkg_manifest_file}.2 | pkgfmt > #{pkg_manifest_file}.3")
       shellout!("pkgmogrify -DARCH=`uname -p` #{pkg_manifest_file}.3 #{transform_file} | pkgfmt > #{pkg_manifest_file}.4")
       shellout!("pkgdepend resolve -m #{pkg_manifest_file}.4")
+      shellout!("pkgmogrify #{pkg_manifest_file}.4.res #{versionlock_file} > #{pkg_manifest_file}.5.res")
     end
 
     #
@@ -243,7 +290,7 @@ module Omnibus
     #
     def validate_pkg_manifest
       log.info(log_key) { "Validating package manifest" }
-      shellout!("pkglint -c /tmp/lint-cache -r http://pkg.oracle.com/solaris/release #{pkg_manifest_file}.4.res")
+      shellout!("pkglint -c /tmp/lint-cache -r http://pkg.oracle.com/solaris/release #{pkg_manifest_file}.5.res")
     end
 
     #
@@ -263,7 +310,7 @@ module Omnibus
     #
     def publish_ips_pkg
       shellout!("pkgrepo -s #{repo_dir} set publisher/prefix=#{publisher_prefix}")
-      shellout!("pkgsend publish -s #{repo_dir} -d #{source_dir} #{pkg_manifest_file}.4.res")
+      shellout!("pkgsend publish -s #{repo_dir} -d #{source_dir} #{pkg_manifest_file}.5.res")
       log.info(log_key) { "Published IPS package to repo: #{repo_dir}" }
 
       repo_info = shellout("pkg list -afv -g #{repo_dir}").stdout

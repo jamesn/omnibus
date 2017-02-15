@@ -368,7 +368,7 @@ module Omnibus
     def build_version(val = NULL, &block)
       if block && !null?(val)
         raise Error, "You cannot specify additional parameters to " \
-          '#build_version when a block is given!'
+          "#build_version when a block is given!"
       end
 
       if block
@@ -1072,16 +1072,27 @@ module Omnibus
       FileUtils.rm_rf(install_dir)
       FileUtils.mkdir_p(install_dir)
 
-      softwares.each do |software|
-        software.build_me
+      Licensing.create_incrementally(self) do |license_collector|
+        softwares.each do |software|
+          software.build_me([license_collector])
+        end
+
+        # If nothing has dirtied the cache, checkout the last cache dir
+        restore_complete_build unless dirty?
       end
 
       write_json_manifest
       write_text_manifest
-      Licensing.create!(self)
       HealthCheck.run!(self)
       package_me
       compress_me
+    end
+
+    def restore_complete_build
+      if Config.use_git_caching
+        log.info(log_key) { "Cache not dirtied, restoring last marker" }
+        GitCache.new(softwares.last).restore_from_cache
+      end
     end
 
     def write_json_manifest

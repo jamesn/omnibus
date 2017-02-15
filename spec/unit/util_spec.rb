@@ -4,7 +4,38 @@ module Omnibus
   describe Util do
     subject { Class.new { include Util }.new }
 
-    describe '#shellout!' do
+    describe "#retry_block" do
+      class OurTestException < StandardError; end
+      let(:expected_retries) { 3 }
+      let(:expected_calls) { expected_retries + 1 }
+      let(:sentinel) { double }
+
+      it "retries the block if the passed exception is raised" do
+        expect(sentinel).to receive(:call_me).and_raise(OurTestException)
+        expect(sentinel).to receive(:call_me).and_return(:test_return)
+        block_return = nil
+        expect do
+          block_return = subject.retry_block("test", [OurTestException], expected_retries) { sentinel.call_me }
+        end.to_not raise_error
+        expect(block_return).to eq(:test_return)
+      end
+
+      it "raises the last exception if the number of retries is exceeded" do
+        expect(sentinel).to receive(:call_me).exactly(expected_calls).times.and_raise(OurTestException)
+        expect do
+          subject.retry_block("test", [OurTestException], expected_retries) { sentinel.call_me }
+        end.to raise_error(OurTestException)
+      end
+
+      it "doesn't retry exceptions not listed by the user" do
+        expect(sentinel).to receive(:call_me).exactly(1).times.and_raise(StandardError)
+        expect do
+          subject.retry_block("test", [OurTestException], expected_retries) { sentinel.call_me }
+        end.to raise_error(StandardError)
+      end
+    end
+
+    describe "#shellout!" do
       let(:shellout) do
         double(Mixlib::ShellOut,
           command:     "evil command",
@@ -28,9 +59,9 @@ module Omnibus
         end
 
         it "raises an CommandFailed exception" do
-          expect {
+          expect do
             subject.shellout!
-          }.to raise_error(CommandFailed) { |error|
+          end.to raise_error(CommandFailed) { |error|
             message = error.message
 
             expect(message).to include("$ I_LOVE_YOU=barney TICKLE_ME=elmo evil command")
@@ -49,9 +80,9 @@ module Omnibus
         end
 
         it "raises an CommandFailed exception" do
-          expect {
+          expect do
             subject.shellout!
-          }.to raise_error(CommandTimeout) { |error|
+          end.to raise_error(CommandTimeout) { |error|
             message = error.message
 
             expect(message).to include("shell command timed out at 7,200 seconds")
@@ -62,7 +93,7 @@ module Omnibus
       end
     end
 
-    describe '#create_directory' do
+    describe "#create_directory" do
       before { allow(FileUtils).to receive(:mkdir_p) }
 
       it "creates the directory" do
@@ -80,7 +111,7 @@ module Omnibus
       end
     end
 
-    describe '#remove_directory' do
+    describe "#remove_directory" do
       before { allow(FileUtils).to receive(:rm_rf) }
 
       it "remove the directory" do
@@ -99,7 +130,7 @@ module Omnibus
       end
     end
 
-    describe '#copy_file' do
+    describe "#copy_file" do
       before { allow(FileUtils).to receive(:cp) }
 
       it "copies the file" do
@@ -117,7 +148,7 @@ module Omnibus
       end
     end
 
-    describe '#remove_file' do
+    describe "#remove_file" do
       before { allow(FileUtils).to receive(:rm_f) }
 
       it "removes the file" do
@@ -136,7 +167,7 @@ module Omnibus
       end
     end
 
-    describe '#create_file' do
+    describe "#create_file" do
       before do
         allow(FileUtils).to receive(:mkdir_p)
         allow(FileUtils).to receive(:touch)
@@ -171,7 +202,7 @@ module Omnibus
       end
     end
 
-    describe '#create_link' do
+    describe "#create_link" do
       before { allow(FileUtils).to receive(:ln_s) }
 
       it "creates the directory" do

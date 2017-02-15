@@ -8,7 +8,7 @@ module Omnibus
         project.name("project")
         project.homepage("https://example.com")
         project.install_dir("/opt/project")
-        project.build_version("1.2.3")
+        project.build_version("1.2.3+20161003185500.git.37.089ab3f")
         project.build_iteration("2")
         project.maintainer("Chef Software")
       end
@@ -39,7 +39,7 @@ module Omnibus
       end
     end
 
-    describe '#publisher_prefix' do
+    describe "#publisher_prefix" do
       it "is a DSL method" do
         expect(subject).to have_exposed_method(:publisher_prefix)
       end
@@ -49,47 +49,47 @@ module Omnibus
       end
     end
 
-    it '#id is :IPS' do
+    it "#id is :IPS" do
       expect(subject.id).to eq(:ips)
     end
 
-    describe '#package_name' do
+    describe "#package_name" do
       it "should create correct package name" do
-        expect(subject.package_name).to eq("project.p5p")
+        expect(subject.package_name).to eq("project-1.2.3+20161003185500.git.37.089ab3f-2.i386.p5p")
       end
     end
 
-    describe '#fmri_package_name' do
+    describe "#fmri_package_name" do
       it "should create correct fmri package name" do
         expect(subject.fmri_package_name).to eq ("project@1.2.3,5.11-2")
       end
     end
 
-    describe '#pkg_metadata_file' do
+    describe "#pkg_metadata_file" do
       it "is created inside the staging_dir" do
         expect(subject.pkg_metadata_file).to eq("#{subject.staging_dir}/gen.manifestfile")
       end
     end
 
-    describe '#pkg_manifest_file' do
+    describe "#pkg_manifest_file" do
       it "is created inside the staging_dir" do
         expect(subject.pkg_manifest_file).to eq("#{subject.staging_dir}/#{subject.safe_base_package_name}.p5m")
       end
     end
 
-    describe '#repo_dir' do
+    describe "#repo_dir" do
       it "is created inside the staging_dir" do
         expect(subject.repo_dir).to eq("#{subject.staging_dir}/publish/repo")
       end
     end
 
-    describe '#source_dir' do
+    describe "#source_dir" do
       it "is created inside the staging_dir" do
         expect(subject.source_dir).to eq("#{subject.staging_dir}/proto_install")
       end
     end
 
-    describe '#safe_base_package_name' do
+    describe "#safe_base_package_name" do
       context 'when the project name is "safe"' do
         it "returns the value without logging a message" do
           expect(subject.safe_base_package_name).to eq("project")
@@ -110,7 +110,7 @@ module Omnibus
       end
     end
 
-    describe '#safe_architecture' do
+    describe "#safe_architecture" do
       context "the architecture is Intel-based" do
         let(:architecture) { "i86pc" }
 
@@ -136,6 +136,16 @@ module Omnibus
       end
     end
 
+    describe "#write_versionlock_file" do
+      let(:versionlock_file) { File.join(staging_dir, "version-lock") }
+
+      it "creates the version-lock file" do
+        subject.write_versionlock_file
+        versionlock_file_contents = File.read(versionlock_file)
+        expect(versionlock_file_contents).to include("<transform pkg depend -> default facet.version-lock.*> false>")
+      end
+    end
+
     describe "#write_transform_file" do
       let(:transform_file) { File.join(staging_dir, "doc-transform") }
 
@@ -144,17 +154,49 @@ module Omnibus
         transform_file_contents = File.read(transform_file)
         expect(transform_file_contents).to include("<transform dir path=opt$ -> edit group bin sys>")
         expect(transform_file_contents).to include("<transform file depend -> edit pkg.debug.depend.file ruby env>")
+        expect(transform_file_contents).to include("<transform file depend -> edit pkg.debug.depend.file make env>")
+        expect(transform_file_contents).to include("<transform file depend -> edit pkg.debug.depend.file perl env>")
       end
     end
 
     describe "#write_pkg_metadata" do
+      let(:resources_path) { File.join(tmp_path, "resources/path") }
+      let(:manifest_file) { File.join(staging_dir, "gen.manifestfile") }
+
       it "should create metadata correctly" do
         subject.write_pkg_metadata
-        manifest_file = File.join(staging_dir, "gen.manifestfile")
-        manifest_file_contents = File.read(manifest_file)
         expect(File.exist?(manifest_file)).to be(true)
+        manifest_file_contents = File.read(manifest_file)
         expect(manifest_file_contents).to include("set name=pkg.fmri value=developer/versioning/project@1.2.3,5.11-2")
         expect(manifest_file_contents).to include("set name=variant.arch value=i386")
+      end
+
+      context "when symlinks.erb exists" do
+        before do
+          FileUtils.mkdir_p(resources_path)
+          allow(subject).to receive(:resources_path).and_return(resources_path)
+          File.open(File.join(resources_path, "symlinks.erb"), "w+") do |f|
+            f.puts("link path=usr/bin/ohai target=<%= projectdir %>/bin/ohai")
+            f.puts("link path=<%= projectdir %>/bin/gmake target=<%= projectdir %>/embedded/bin/make")
+          end
+        end
+
+        it "should append symlinks to metadata contents" do
+          subject.write_pkg_metadata
+          expect(File.exist?(manifest_file)).to be(true)
+          manifest_file_contents = File.read(manifest_file)
+          expect(manifest_file_contents).to include("link path=usr/bin/ohai target=/opt/project/bin/ohai")
+          expect(manifest_file_contents).to include("link path=/opt/project/bin/gmake target=/opt/project/embedded/bin/make")
+        end
+      end
+
+      context "when symlinks.erb does not exist" do
+        it "#write_pkg_metadata does not include symlinks" do
+          subject.write_pkg_metadata
+          manifest_file = File.join(staging_dir, "gen.manifestfile")
+          manifest_file_contents = File.read(manifest_file)
+          expect(manifest_file_contents).not_to include("link path=usr/bin/ohai target=/opt/project/bin/ohai")
+        end
       end
     end
 
@@ -176,6 +218,8 @@ module Omnibus
           .with("pkgmogrify -DARCH=`uname -p` #{staging_dir}/project.p5m.3 #{staging_dir}/doc-transform | pkgfmt > #{staging_dir}/project.p5m.4")
         expect(subject).to receive(:shellout!)
           .with("pkgdepend resolve -m #{staging_dir}/project.p5m.4")
+        expect(subject).to receive(:shellout!)
+          .with("pkgmogrify #{staging_dir}/project.p5m.4.res #{staging_dir}/version-lock > #{staging_dir}/project.p5m.5.res")
         subject.generate_pkg_deps
       end
     end
@@ -183,7 +227,7 @@ module Omnibus
     describe "#validate_pkg_manifest" do
       it "uses the correct commands" do
         expect(subject).to receive(:shellout!)
-          .with("pkglint -c /tmp/lint-cache -r http://pkg.oracle.com/solaris/release #{staging_dir}/project.p5m.4.res")
+          .with("pkglint -c /tmp/lint-cache -r http://pkg.oracle.com/solaris/release #{staging_dir}/project.p5m.5.res")
         subject.validate_pkg_manifest
       end
     end
@@ -201,7 +245,7 @@ module Omnibus
         expect(subject).to receive(:shellout!)
           .with("pkgrepo -s #{staging_dir}/publish/repo set publisher/prefix=Omnibus")
         expect(subject).to receive(:shellout!)
-          .with("pkgsend publish -s #{staging_dir}/publish/repo -d #{staging_dir}/proto_install #{staging_dir}/project.p5m.4.res")
+          .with("pkgsend publish -s #{staging_dir}/publish/repo -d #{staging_dir}/proto_install #{staging_dir}/project.p5m.5.res")
 
         expect(shellout).to receive(:stdout)
         subject.publish_ips_pkg
@@ -211,7 +255,7 @@ module Omnibus
     describe "#export_pkg_archive_file" do
       it "uses the correct commands" do
         expect(subject).to receive(:shellout!)
-          .with("pkgrecv -s #{staging_dir}/publish/repo -a -d #{package_dir}/project.p5p project")
+          .with("pkgrecv -s #{staging_dir}/publish/repo -a -d #{package_dir}/project-1.2.3+20161003185500.git.37.089ab3f-2.i386.p5p project")
 
         expect(shellout).to receive(:stdout)
         subject.export_pkg_archive_file

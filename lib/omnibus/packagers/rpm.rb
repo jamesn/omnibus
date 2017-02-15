@@ -228,6 +228,56 @@ module Omnibus
     expose :dist_tag
 
     #
+    # Set or return the compression type (:gzip, :bzip2, :xz) for this package
+    #
+    # @example
+    #   compression_type :xz
+    #
+    # @param [Symbol] val
+    #   the compression type
+    #
+    # @return [String]
+    #   the compression type for this package
+    #
+    def compression_type(val = NULL)
+      if null?(val)
+        @compression_type || :gzip
+      else
+        unless val.is_a?(Symbol) && [:gzip, :bzip2, :xz].member?(val)
+          raise InvalidValue.new(:compression_type, "be a Symbol (:gzip, :bzip2, or :xz)")
+        end
+
+        @compression_type = val
+      end
+    end
+    expose :compression_type
+
+    #
+    # Set or return the compression level (1-9) for this package
+    #
+    # @example
+    #   compression_level 6
+    #
+    # @param [Integer] val
+    #   the compression level
+    #
+    # @return [Integer]
+    #   the compression level for this package
+    #
+    def compression_level(val = NULL)
+      if null?(val)
+        @compression_level || 9
+      else
+        unless val.is_a?(Integer) && 1 <= val && 9 >= val
+          raise InvalidValue.new(:compression_level, "be an Integer (between 1 and 9)")
+        end
+
+        @compression_level = val
+      end
+    end
+    expose :compression_level
+
+    #
     # @!endgroup
     # --------------------------------------------------
 
@@ -332,19 +382,38 @@ module Omnibus
           files:           files,
           build_dir:       build_dir,
           platform_family: Ohai["platform_family"],
+          compression:     compression,
         }
       )
     end
 
     #
-    # Generate the RPM file using +rpmbuild+.  The use of the +fakeroot+ command
-    # is required so that the package is owned by +root:root+, but the build
-    # user does not need to have sudo permissions.
+    # Returns the RPM spec "_binary_payload" line corresponding to the
+    # compression configuration.
+    #
+    # @return [String]
+    #
+    def compression
+      compression_name = case compression_type
+                         when :bzip2
+                           "bzdio"
+                         when :xz
+                           "xzdio"
+                         else # default to gzip
+                           "gzdio"
+                         end
+      "w#{compression_level}.#{compression_name}"
+    end
+
+    #
+    # Generate the RPM file using +rpmbuild+. Unlike debian,the +fakeroot+
+    # command is not required for the package to be owned by +root:root+. The
+    # rpmuser specified in the spec file dictates this.
     #
     # @return [void]
     #
     def create_rpm_file
-      command =  %{fakeroot rpmbuild}
+      command =  %{rpmbuild}
       command << %{ --target #{safe_architecture}}
       command << %{ -bb}
       command << %{ --buildroot #{staging_dir}/BUILD}

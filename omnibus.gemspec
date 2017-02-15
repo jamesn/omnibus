@@ -13,7 +13,7 @@ Gem::Specification.new do |gem|
   gem.description    = gem.summary
   gem.homepage       = "https://github.com/opscode/omnibus"
 
-  gem.required_ruby_version = ">= 2"
+  gem.required_ruby_version = ">= 2.2"
 
   gem.files = `git ls-files`.split($/)
   gem.bindir = "bin"
@@ -33,11 +33,12 @@ Gem::Specification.new do |gem|
   gem.add_dependency "aws-sdk",          "~> 2"
   gem.add_dependency "thor",             "~> 0.18"
   gem.add_dependency "ffi-yajl",         "~> 2.2"
+  gem.add_dependency "license_scout"
 
   gem.add_development_dependency "bundler"
   gem.add_development_dependency "artifactory", "~> 2.0"
   gem.add_development_dependency "aruba",       "~> 0.5"
-  gem.add_development_dependency "chefstyle",   "~> 0.3"
+  gem.add_development_dependency "chefstyle"
   gem.add_development_dependency "fauxhai",     "~> 3.2"
   gem.add_development_dependency "rspec",       "~> 3.0"
   gem.add_development_dependency "rspec-json_expectations"

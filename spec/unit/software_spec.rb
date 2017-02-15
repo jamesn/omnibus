@@ -41,6 +41,8 @@ module Omnibus
     it_behaves_like "a cleanroom setter", :version, %{version '1.2.3'}
     it_behaves_like "a cleanroom setter", :license, %{license 'Apache 2.0'}
     it_behaves_like "a cleanroom setter", :license_file, %{license_file 'LICENSES/artistic.txt'}
+    it_behaves_like "a cleanroom setter", :skip_transitive_dependency_licensing, %{skip_transitive_dependency_licensing true}
+    it_behaves_like "a cleanroom setter", :dependency_licenses, %{dependency_licenses [{license: "MIT"}]}
     it_behaves_like "a cleanroom setter", :whitelist_file, %{whitelist_file '/opt/whatever'}
     it_behaves_like "a cleanroom setter", :relative_path, %{relative_path '/path/to/extracted'}
     it_behaves_like "a cleanroom setter", :build, %|build {}|
@@ -192,9 +194,9 @@ module Omnibus
           expect(subject.with_standard_compiler_flags).to eq(
             "CC"              => "gcc -static-libgcc",
             "LDFLAGS"         => "-R/opt/project/embedded/lib -L/opt/project/embedded/lib -static-libgcc",
-            "CFLAGS"          => "-I/opt/project/embedded/include",
-            "CXXFLAGS"        => "-I/opt/project/embedded/include",
-            "CPPFLAGS"        => "-I/opt/project/embedded/include",
+            "CFLAGS"          => "-I/opt/project/embedded/include -O2",
+            "CXXFLAGS"        => "-I/opt/project/embedded/include -O2",
+            "CPPFLAGS"        => "-I/opt/project/embedded/include -O2",
             "LD_RUN_PATH"     => "/opt/project/embedded/lib",
             "LD_OPTIONS"      => "-R/opt/project/embedded/lib",
             "PKG_CONFIG_PATH" => "/opt/project/embedded/lib/pkgconfig"
@@ -218,9 +220,9 @@ module Omnibus
             expect(subject.with_standard_compiler_flags).to eq(
               "CC"              => "gcc -static-libgcc",
               "LDFLAGS"         => "-R/opt/project/embedded/lib -L/opt/project/embedded/lib -static-libgcc",
-              "CFLAGS"          => "-I/opt/project/embedded/include",
-              "CXXFLAGS"        => "-I/opt/project/embedded/include",
-              "CPPFLAGS"        => "-I/opt/project/embedded/include",
+              "CFLAGS"          => "-I/opt/project/embedded/include -O2",
+              "CXXFLAGS"        => "-I/opt/project/embedded/include -O2",
+              "CPPFLAGS"        => "-I/opt/project/embedded/include -O2",
               "LD_RUN_PATH"     => "/opt/project/embedded/lib",
               "LD_OPTIONS"      => "-R/opt/project/embedded/lib -M #{project_root}/files/mapfile/solaris",
               "PKG_CONFIG_PATH" => "/opt/project/embedded/lib/pkgconfig"
@@ -323,6 +325,61 @@ module Omnibus
         end
       end
 
+      context "on sles 11" do
+        before do
+          # sles identifies as suse
+          stub_ohai(platform: "suse", version: "11.4")
+        end
+        it "sets the defaults" do
+          expect(subject.with_standard_compiler_flags).to eq(
+          "LDFLAGS"         => "-Wl,-rpath,/opt/project/embedded/lib -L/opt/project/embedded/lib",
+          "CFLAGS"          => "-I/opt/project/embedded/include -O2",
+          "CXXFLAGS"        => "-I/opt/project/embedded/include -O2",
+          "CPPFLAGS"        => "-I/opt/project/embedded/include -O2",
+          "LD_RUN_PATH"     => "/opt/project/embedded/lib",
+          "PKG_CONFIG_PATH" => "/opt/project/embedded/lib/pkgconfig"
+          )
+        end
+
+        context "with gcc 4.8 installed" do
+
+          before do
+            allow(subject).to receive(:which).and_return("/usr/bin/gcc-4.8")
+          end
+
+          it "sets the compiler args" do
+            expect(subject.with_standard_compiler_flags).to eq(
+              "CC"              => "gcc-4.8",
+              "CXX"             => "g++-4.8",
+              "LDFLAGS"         => "-Wl,-rpath,/opt/project/embedded/lib -L/opt/project/embedded/lib",
+              "CFLAGS"          => "-I/opt/project/embedded/include -O2",
+              "CXXFLAGS"        => "-I/opt/project/embedded/include -O2",
+              "CPPFLAGS"        => "-I/opt/project/embedded/include -O2",
+              "LD_RUN_PATH"     => "/opt/project/embedded/lib",
+              "PKG_CONFIG_PATH" => "/opt/project/embedded/lib/pkgconfig"
+              )
+          end
+        end
+      end
+
+      context "on sles 12" do
+        before do
+          # sles identifies as suse
+          stub_ohai(platform: "suse", version: "12.1")
+        end
+
+        it "sets the defaults" do
+          expect(subject.with_standard_compiler_flags).to eq(
+            "LDFLAGS"         => "-Wl,-rpath,/opt/project/embedded/lib -L/opt/project/embedded/lib",
+            "CFLAGS"          => "-I/opt/project/embedded/include -O2",
+            "CXXFLAGS"        => "-I/opt/project/embedded/include -O2",
+            "CPPFLAGS"        => "-I/opt/project/embedded/include -O2",
+            "LD_RUN_PATH"     => "/opt/project/embedded/lib",
+            "PKG_CONFIG_PATH" => "/opt/project/embedded/lib/pkgconfig"
+          )
+        end
+      end
+
       context "on Windows" do
         let(:win_arch_i386) { true }
 
@@ -334,23 +391,10 @@ module Omnibus
         context "in 32-bit mode" do
           it "sets the default" do
             expect(subject.with_standard_compiler_flags).to eq(
-              "CFLAGS"          => "-I/opt/project/embedded/include -m32 -O3 -march=i686",
-              "CXXFLAGS"        => "-I/opt/project/embedded/include -m32 -O3 -march=i686",
-              "CPPFLAGS"        => "-I/opt/project/embedded/include -m32 -O3 -march=i686",
-              "LDFLAGS"         => "-L/opt/project/embedded/lib -m32",
-              "LD_RUN_PATH"     => "/opt/project/embedded/lib",
-              "PKG_CONFIG_PATH" => "/opt/project/embedded/lib/pkgconfig"
-            )
-          end
-
-          it "sets BFD flags if requested" do
-            expect(subject.with_standard_compiler_flags({}, bfd_flags: true)).to eq(
-              "CFLAGS"          => "-I/opt/project/embedded/include -m32 -O3 -march=i686",
-              "CXXFLAGS"        => "-I/opt/project/embedded/include -m32 -O3 -march=i686",
-              "CPPFLAGS"        => "-I/opt/project/embedded/include -m32 -O3 -march=i686",
-              "LDFLAGS"         => "-L/opt/project/embedded/lib -m32",
-              "RCFLAGS"         => "--target=pe-i386",
-              "ARFLAGS"         => "--target=pe-i386",
+              "CFLAGS"          => "-I/opt/project/embedded/include -m32 -O2 -fno-lto -march=i686",
+              "CXXFLAGS"        => "-I/opt/project/embedded/include -m32 -O2 -fno-lto -march=i686",
+              "CPPFLAGS"        => "-I/opt/project/embedded/include -m32 -O2 -fno-lto -march=i686",
+              "LDFLAGS"         => "-L/opt/project/embedded/lib -m32 -fno-lto",
               "LD_RUN_PATH"     => "/opt/project/embedded/lib",
               "PKG_CONFIG_PATH" => "/opt/project/embedded/lib/pkgconfig"
             )
@@ -362,23 +406,10 @@ module Omnibus
 
           it "sets the default" do
             expect(subject.with_standard_compiler_flags).to eq(
-              "CFLAGS"          => "-I/opt/project/embedded/include -m64 -O3 -march=x86-64",
-              "CXXFLAGS"        => "-I/opt/project/embedded/include -m64 -O3 -march=x86-64",
-              "CPPFLAGS"        => "-I/opt/project/embedded/include -m64 -O3 -march=x86-64",
-              "LDFLAGS"         => "-L/opt/project/embedded/lib -m64",
-              "LD_RUN_PATH"     => "/opt/project/embedded/lib",
-              "PKG_CONFIG_PATH" => "/opt/project/embedded/lib/pkgconfig"
-            )
-          end
-
-          it "sets BFD flags if requested" do
-            expect(subject.with_standard_compiler_flags({}, bfd_flags: true)).to eq(
-              "CFLAGS"          => "-I/opt/project/embedded/include -m64 -O3 -march=x86-64",
-              "CXXFLAGS"        => "-I/opt/project/embedded/include -m64 -O3 -march=x86-64",
-              "CPPFLAGS"        => "-I/opt/project/embedded/include -m64 -O3 -march=x86-64",
-              "LDFLAGS"         => "-L/opt/project/embedded/lib -m64",
-              "RCFLAGS"         => "--target=pe-x86-64",
-              "ARFLAGS"         => "--target=pe-x86-64",
+              "CFLAGS"          => "-I/opt/project/embedded/include -m64 -O2 -fno-lto -march=x86-64",
+              "CXXFLAGS"        => "-I/opt/project/embedded/include -m64 -O2 -fno-lto -march=x86-64",
+              "CPPFLAGS"        => "-I/opt/project/embedded/include -m64 -O2 -fno-lto -march=x86-64",
+              "LDFLAGS"         => "-L/opt/project/embedded/lib -m64 -fno-lto",
               "LD_RUN_PATH"     => "/opt/project/embedded/lib",
               "PKG_CONFIG_PATH" => "/opt/project/embedded/lib/pkgconfig"
             )
@@ -420,12 +451,6 @@ module Omnibus
         it "with_embedded_path merges with a hash argument" do
           expect(subject.with_embedded_path("numberwang" => 4)).to eq(
             "numberwang" => 4,
-            "PATH" => prepended_path
-          )
-        end
-
-        it "with_embedded_path ignores option to add msys to path" do
-          expect(subject.with_embedded_path({}, msys: true)).to eq(
             "PATH" => prepended_path
           )
         end
@@ -473,18 +498,11 @@ module Omnibus
               "PATH" => prepended_path
             )
           end
-
-          it "with_embedded_path accepts option to add msys to path" do
-            expect(subject.with_embedded_path({}, msys: true)).to eq(
-              "PATH" => prepended_path_msys
-            )
-          end
-
         end
       end
     end
 
-    describe '#ohai' do
+    describe "#ohai" do
       before { stub_ohai(platform: "ubuntu", version: "12.04") }
 
       it "is a DSL method" do
@@ -554,7 +572,7 @@ module Omnibus
       end
     end
 
-    describe '#<=>' do
+    describe "#<=>" do
       let(:zlib)   { described_class.new(project).tap { |s| s.name("zlib") } }
       let(:erchef) { described_class.new(project).tap { |s| s.name("erchef") } }
       let(:bacon)  { described_class.new(project).tap { |s| s.name("bacon") } }
@@ -565,7 +583,7 @@ module Omnibus
       end
     end
 
-    describe '#whitelist_file' do
+    describe "#whitelist_file" do
       it "appends to the whitelist_files array" do
         expect(subject.whitelist_files.size).to eq(0)
         subject.whitelist_file(/foo\/bar/)
@@ -674,7 +692,7 @@ module Omnibus
       end
     end
 
-    describe '#fetcher' do
+    describe "#fetcher" do
       before do
         expect(Omnibus::Fetcher).to receive(:resolve_version).with("1.2.3", source).and_return("1.2.8")
       end
@@ -798,7 +816,7 @@ module Omnibus
       end
     end
 
-    describe '#shasum' do
+    describe "#shasum" do
       context "when a filepath is given" do
         let(:path) { "/software.rb" }
         let(:file) { double(File) }

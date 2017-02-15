@@ -30,7 +30,7 @@ module Omnibus
       create_directory("#{staging_dir}/DEBIAN")
     end
 
-    describe '#vendor' do
+    describe "#vendor" do
       it "is a DSL method" do
         expect(subject).to have_exposed_method(:vendor)
       end
@@ -44,7 +44,7 @@ module Omnibus
       end
     end
 
-    describe '#license' do
+    describe "#license" do
       it "is a DSL method" do
         expect(subject).to have_exposed_method(:license)
       end
@@ -66,7 +66,7 @@ module Omnibus
       end
     end
 
-    describe '#priority' do
+    describe "#priority" do
       it "is a DSL method" do
         expect(subject).to have_exposed_method(:priority)
       end
@@ -80,7 +80,7 @@ module Omnibus
       end
     end
 
-    describe '#section' do
+    describe "#section" do
       it "is a DSL method" do
         expect(subject).to have_exposed_method(:section)
       end
@@ -94,13 +94,55 @@ module Omnibus
       end
     end
 
-    describe '#id' do
+    describe "#compression_type" do
+      it "is a DSL method" do
+        expect(subject).to have_exposed_method(:compression_type)
+      end
+
+      it "has a default value" do
+        expect(subject.compression_type).to eq(:gzip)
+      end
+
+      it "must be a symbol" do
+        expect { subject.compression_type(Object.new) }.to raise_error(InvalidValue)
+      end
+    end
+
+    describe "#compression_level" do
+      it "is a DSL method" do
+        expect(subject).to have_exposed_method(:compression_level)
+      end
+
+      it "has a default value" do
+        expect(subject.compression_level).to eq(9)
+      end
+
+      it "must be a symbol" do
+        expect { subject.compression_level(Object.new) }.to raise_error(InvalidValue)
+      end
+    end
+
+    describe "#compression_strategy" do
+      it "is a DSL method" do
+        expect(subject).to have_exposed_method(:compression_strategy)
+      end
+
+      it "has a default value" do
+        expect(subject.compression_strategy).to eq(nil)
+      end
+
+      it "must be a symbol" do
+        expect { subject.compression_strategy(Object.new) }.to raise_error(InvalidValue)
+      end
+    end
+
+    describe "#id" do
       it "is :deb" do
         expect(subject.id).to eq(:deb)
       end
     end
 
-    describe '#package_name' do
+    describe "#package_name" do
       before do
         allow(subject).to receive(:safe_architecture).and_return("amd64")
       end
@@ -110,13 +152,13 @@ module Omnibus
       end
     end
 
-    describe '#debian_dir' do
+    describe "#debian_dir" do
       it "is nested inside the staging_dir" do
         expect(subject.debian_dir).to eq("#{staging_dir}/DEBIAN")
       end
     end
 
-    describe '#write_control_file' do
+    describe "#write_control_file" do
       before do
         allow(subject).to receive(:safe_architecture).and_return("amd64")
       end
@@ -144,7 +186,7 @@ module Omnibus
       end
     end
 
-    describe '#write_conffiles_file' do
+    describe "#write_conffiles_file" do
       before do
         project.config_file("/opt/project/file1")
         project.config_file("/opt/project/file2")
@@ -173,7 +215,7 @@ module Omnibus
       end
     end
 
-    describe '#write_scripts' do
+    describe "#write_scripts" do
       before do
         create_file("#{project_root}/package-scripts/project/preinst") { "preinst" }
         create_file("#{project_root}/package-scripts/project/postinst") { "postinst" }
@@ -207,7 +249,7 @@ module Omnibus
       end
     end
 
-    describe '#write_md5_sums' do
+    describe "#write_md5_sums" do
       before do
         create_file("#{staging_dir}/.filea") { ".filea" }
         create_file("#{staging_dir}/file1") { "file1" }
@@ -234,7 +276,7 @@ module Omnibus
       end
     end
 
-    describe '#create_deb_file' do
+    describe "#create_deb_file" do
       before do
         allow(subject).to receive(:shellout!)
         allow(Dir).to receive(:chdir) { |_, &b| b.call }
@@ -257,9 +299,45 @@ module Omnibus
           .with(/dpkg-deb -z9 -Zgzip -D --build/)
         subject.create_deb_file
       end
+
+      describe "when deb compression type xz is configured" do
+        before do
+          subject.compression_type(:xz)
+        end
+
+        it "uses the correct command for xz" do
+          expect(subject).to receive(:shellout!)
+            .with(/dpkg-deb -z9 -Zxz -D --build/)
+          subject.create_deb_file
+        end
+
+        context "when deb compression level is configured" do
+          before do
+            subject.compression_level(6)
+          end
+
+          it "uses the correct command for xz" do
+            expect(subject).to receive(:shellout!)
+              .with(/dpkg-deb -z6 -Zxz -D --build/)
+            subject.create_deb_file
+          end
+        end
+
+        context "when deb compression strategy is configured" do
+          before do
+            subject.compression_strategy(:extreme)
+          end
+
+          it "uses the correct command for xz" do
+            expect(subject).to receive(:shellout!)
+              .with(/dpkg-deb -z9 -Zxz -Sextreme -D --build/)
+            subject.create_deb_file
+          end
+        end
+      end
     end
 
-    describe '#package_size' do
+    describe "#package_size" do
       before do
         project.install_dir(staging_dir)
 
@@ -272,7 +350,7 @@ module Omnibus
       end
     end
 
-    describe '#safe_base_package_name' do
+    describe "#safe_base_package_name" do
       context 'when the project name is "safe"' do
         it "returns the value without logging a message" do
           expect(subject.safe_base_package_name).to eq("project")
@@ -293,13 +371,13 @@ module Omnibus
       end
     end
 
-    describe '#safe_build_iteration' do
+    describe "#safe_build_iteration" do
       it "returns the build iteration" do
         expect(subject.safe_build_iteration).to eq(project.build_iteration)
       end
     end
 
-    describe '#safe_version' do
+    describe "#safe_version" do
       context 'when the project build_version is "safe"' do
         it "returns the value without logging a message" do
           expect(subject.safe_version).to eq("1.2.3")
@@ -332,7 +410,7 @@ module Omnibus
       end
     end
 
-    describe '#safe_architecture' do
+    describe "#safe_architecture" do
       let(:shellout) { double("Mixlib::ShellOut", :run_command => true, :error! => nil) }
 
       before do

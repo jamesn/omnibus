@@ -76,6 +76,7 @@ module Omnibus
     include Logging
     include NullArgumentable
     include Sugarable
+    include Util
 
     attr_reader :manifest
 
@@ -379,6 +380,59 @@ module Omnibus
     expose :license_file
 
     #
+    # Skip collecting licenses of transitive dependencies for this software
+    #
+    # @example
+    #   skip_transitive_dependency_licensing true
+    #
+    # @param [Boolean] val
+    #   set or reset transitive dependency license collection
+    #
+    # @return [Boolean]
+    #
+    def skip_transitive_dependency_licensing(val = NULL)
+      if null?(val)
+        @skip_transitive_dependency_licensing || false
+      else
+        @skip_transitive_dependency_licensing = val
+      end
+    end
+    expose :skip_transitive_dependency_licensing
+
+    #
+    # Set or retrieve licensing information of the dependencies.
+    # The information set is not validated or inspected. It is directly
+    #   passed to LicenseScout.
+    #
+    # @example
+    # dependency_licenses [
+    #   {
+    #     dependency_name: "logstash-output-websocket",
+    #     dependency_manager: "logstash_plugin",
+    #     license: "Apache-2.0",
+    #     license_file: [
+    #       "relative/path/to/license/file",
+    #       "https://download.elastic.co/logstash/LICENSE"
+    #     ]
+    #   },
+    #   ...
+    # ]
+    #
+    # @param [Hash] val
+    # @param [Array<Hash>] val
+    #   dependency license information.
+    # @return [Array<Hash>]
+    #
+    def dependency_licenses(val = NULL)
+      if null?(val)
+        @dependency_licenses || nil
+      else
+        @dependency_licenses = Array(val)
+      end
+    end
+    expose :dependency_licenses
+
+    #
     # Evaluate a block only if the version matches.
     #
     # @example
@@ -433,7 +487,7 @@ module Omnibus
       rescue ArgumentError
         log.warn(log_key) do
           "Version #{final_version} for software #{name} was not parseable. " \
-          'Comparison methods such as #satisfies? will not be available for this version.'
+          "Comparison methods such as #satisfies? will not be available for this version."
         end
         final_version
       end
@@ -590,8 +644,6 @@ module Omnibus
     #
     # Supported options:
     #    :aix => :use_gcc    force using gcc/g++ compilers on aix
-    #    :bfd_flags => true   the default build targets for windows based on
-    #       the current platform architecture are added ARFLAGS and RCFLAGS.
     #
     # @param [Hash] env
     # @param [Hash] opts
@@ -625,7 +677,7 @@ module Omnibus
               # http://lists.gnu.org/archive/html/bug-libtool/2005-10/msg00004.html
               "CC" => "gcc -static-libgcc",
               "LDFLAGS" => "-R#{install_dir}/embedded/lib -L#{install_dir}/embedded/lib -static-libgcc",
-              "CFLAGS" => "-I#{install_dir}/embedded/include",
+              "CFLAGS" => "-I#{install_dir}/embedded/include -O2",
             }
           elsif platform_version.satisfies?(">= 5.11")
             solaris_flags = {
@@ -651,11 +703,22 @@ module Omnibus
             freebsd_flags["CXX"] = "clang++"
           end
           freebsd_flags
+        when "suse"
+          suse_flags = {
+            "LDFLAGS" => "-Wl,-rpath,#{install_dir}/embedded/lib -L#{install_dir}/embedded/lib",
+            "CFLAGS" => "-I#{install_dir}/embedded/include -O2",
+          }
+          # Enable gcc version 4.8 if it is available
+          if which("gcc-4.8")
+            suse_flags["CC"] = "gcc-4.8"
+            suse_flags["CXX"] = "g++-4.8"
+          end
+          suse_flags
         when "windows"
           arch_flag = windows_arch_i386? ? "-m32" : "-m64"
           opt_flag = windows_arch_i386? ? "-march=i686" : "-march=x86-64"
           {
-            "LDFLAGS" => "-L#{install_dir}/embedded/lib #{arch_flag}",
+            "LDFLAGS" => "-L#{install_dir}/embedded/lib #{arch_flag} -fno-lto",
             # We do not wish to enable SSE even though we target i686 because
             # of a stack alignment issue with some libraries. We have not
             # exactly ascertained the cause but some compiled library/binary
@@ -665,7 +728,13 @@ module Omnibus
             # soon as gcc emits aligned SSE xmm register spills which generate
             # GPEs and terminate the application very rudely with very little
             # to debug with.
-            "CFLAGS" => "-I#{install_dir}/embedded/include #{arch_flag} -O3 #{opt_flag}",
+            #
+            # TODO: This was true of our old TDM gcc 4.7 compilers. Is it still
+            # true with mingw-w64?
+            #
+            # XXX: Temporarily turning -O3 into -O2 -fno-lto to work around some
+            # weird linker issues.
+            "CFLAGS" => "-I#{install_dir}/embedded/include #{arch_flag} -O2 -fno-lto #{opt_flag}",
           }
         else
           {
@@ -674,14 +743,6 @@ module Omnibus
           }
         end
 
-      # There are some weird, misbehaving makefiles on windows that hate ARFLAGS because it
-      # replaces the "rcs" flags in some build steps.  So we provide this flag behind an
-      # optional flag.
-      if opts[:bfd_flags] && windows?
-        bfd_target = windows_arch_i386? ? "pe-i386" : "pe-x86-64"
-        compiler_flags["RCFLAGS"] = "--target=#{bfd_target}"
-        compiler_flags["ARFLAGS"] = "--target=#{bfd_target}"
-      end
       # merge LD_RUN_PATH into the environment.  most unix distros will fall
       # back to this if there is no LDFLAGS passed to the linker that sets
       # the rpath.  the LDFLAGS -R or -Wl,-rpath will override this, but in
@@ -730,18 +791,29 @@ module Omnibus
     # for the platform is used to join the paths.
     #
     # @param [Hash] env
-    # @param [Hash] opts
-    #   :msys => true  add the embedded msys path if building on windows.
     #
     # @return [Hash]
     #
-    def with_embedded_path(env = {}, opts = {})
+    def with_embedded_path(env = {})
       paths = ["#{install_dir}/bin", "#{install_dir}/embedded/bin"]
-      paths << "#{install_dir}/embedded/msys/1.0/bin" if opts[:msys] && windows?
       path_value = prepend_path(paths)
       env.merge(path_key => path_value)
     end
     expose :with_embedded_path
+
+    #
+    # Returns the platform safe full path under embedded/bin directory to the
+    # given binary
+    #
+    # @param [String] bin
+    #   Name of the binary under embedded/bin
+    #
+    # @return [String]
+    #
+    def embedded_bin(bin)
+      windows_safe_path("#{install_dir}/embedded/bin/#{bin}")
+    end
+    expose :embedded_bin
 
     #
     # A PATH variable format string representing the current PATH with the
@@ -1000,25 +1072,33 @@ module Omnibus
     # be restored (if the tag does not exist), the actual build steps are
     # executed.
     #
+    # @param [Array<#execute_pre_build, #execute_post_build>] build_wrappers
+    #   Build wrappers inject behavior before or after the software is built.
+    #   They can be any object that implements `#execute_pre_build` and
+    #   `#execute_post_build`, taking this Software as an argument. Note that
+    #   these callbacks are only triggered when the software actually gets
+    #   built; if the build is skipped by the git cache, the callbacks DO NOT
+    #   run.
+    #
     # @return [true]
     #
-    def build_me
+    def build_me(build_wrappers = [])
       if Config.use_git_caching
         if project.dirty?
           log.info(log_key) do
             "Building because `#{project.culprit.name}' dirtied the cache"
           end
-          execute_build
+          execute_build(build_wrappers)
         elsif git_cache.restore
           log.info(log_key) { "Restored from cache" }
         else
           log.info(log_key) { "Could not restore from cache" }
-          execute_build
+          execute_build(build_wrappers)
           project.dirty!(self)
         end
       else
         log.debug(log_key) { "Forcing build because git caching is off" }
-        execute_build
+        execute_build(build_wrappers)
       end
 
       project.build_version_dsl.resolve(self)
@@ -1141,11 +1221,19 @@ module Omnibus
     # Actually build this software, executing the steps provided in the
     # {#build} block and dirtying the cache.
     #
+    # @param [Array<#execute_pre_build, #execute_post_build>] build_wrappers
+    #   Build wrappers inject behavior before or after the software is built.
+    #   They can be any object that implements `#execute_pre_build` and
+    #   `#execute_post_build`
+    #
     # @return [void]
     #
-    def execute_build
+    def execute_build(build_wrappers)
       fetcher.clean
+
+      build_wrappers.each { |wrapper| wrapper.execute_pre_build(self) }
       builder.build
+      build_wrappers.each { |wrapper| wrapper.execute_post_build(self) }
 
       if Config.use_git_caching
         git_cache.incremental

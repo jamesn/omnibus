@@ -18,9 +18,9 @@ require "ffi_yajl"
 
 module Omnibus
   class Manifest
-    class InvalidManifestFormat < Exception; end
-    class NotAManifestEntry < Exception; end
-    class MissingManifestEntry < Exception; end
+    class InvalidManifestFormat < RuntimeError; end
+    class NotAManifestEntry < RuntimeError; end
+    class MissingManifestEntry < RuntimeError; end
 
     include Logging
 
@@ -127,8 +127,6 @@ module Omnibus
       hash = FFI_Yajl::Parser.parse(data, symbolize_names: true)
       from_hash(hash)
     end
-
-    private
 
     #
     # Utility function to convert a Hash with String keys to a Hash

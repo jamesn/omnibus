@@ -43,6 +43,8 @@ module Omnibus
 
     let(:cache_path) { File.join("/var/cache/omnibus/cache/git_cache", install_dir) }
 
+    let(:cache_serial_number) { described_class::SERIAL_NUMBER }
+
     let(:ipc) do
       project.library.component_added(preparation)
       project.library.component_added(snoopy)
@@ -50,15 +52,15 @@ module Omnibus
       described_class.new(zlib)
     end
 
-    describe '#cache_path' do
+    describe "#cache_path" do
       it "returns the install path appended to the install_cache path" do
         expect(ipc.cache_path).to eq(cache_path)
       end
     end
 
-    describe '#tag' do
+    describe "#tag" do
       it "returns the correct tag" do
-        expect(ipc.tag).to eql("zlib-24a8ec71da04059dcf7ed3c6e8e0fd9d155476abe4b5156d1f13c42e85478c2b")
+        expect(ipc.tag).to eql("zlib-24a8ec71da04059dcf7ed3c6e8e0fd9d155476abe4b5156d1f13c42e85478c2b-#{cache_serial_number}")
       end
 
       describe "with no deps" do
@@ -67,12 +69,12 @@ module Omnibus
         end
 
         it "returns the correct tag" do
-          expect(ipc.tag).to eql("zlib-ee71fc1a512f03b9dd46c1fd9b5ab71fcc51b638857bf328496a31abb2654c2b")
+          expect(ipc.tag).to eql("zlib-ee71fc1a512f03b9dd46c1fd9b5ab71fcc51b638857bf328496a31abb2654c2b-#{cache_serial_number}")
         end
       end
     end
 
-    describe '#create_cache_path' do
+    describe "#create_cache_path" do
       it "runs git init if the cache path does not exist" do
         allow(File).to receive(:directory?)
           .with(ipc.cache_path)
@@ -99,7 +101,7 @@ module Omnibus
       end
     end
 
-    describe '#incremental' do
+    describe "#incremental" do
       before(:each) do
         allow(ipc).to receive(:shellout!)
         allow(ipc).to receive(:create_cache_path)
@@ -130,7 +132,7 @@ module Omnibus
       end
     end
 
-    describe '#remove_git_dirs' do
+    describe "#remove_git_dirs" do
       let(:git_files) { ["git/HEAD", "git/description", "git/hooks", "git/info", "git/objects", "git/refs" ] }
       it "removes bare git directories" do
         allow(Dir).to receive(:glob).and_return(["git/config"])
@@ -153,7 +155,7 @@ module Omnibus
       end
     end
 
-    describe '#restore' do
+    describe "#restore" do
       let(:git_tag_output) { "#{ipc.tag}\n" }
 
       let(:tag_cmd) do
@@ -168,7 +170,7 @@ module Omnibus
           .with(%Q{git -c core.autocrlf=false --git-dir=#{cache_path} --work-tree=#{install_dir} tag -l "#{ipc.tag}"})
           .and_return(tag_cmd)
         allow(ipc).to receive(:shellout!)
-          .with(%Q{git -c core.autocrlf=false --git-dir=#{cache_path} --work-tree=#{install_dir} checkout -f "#{ipc.tag}"})
+          .with(%Q{git -c core.autocrlf=false --git-dir=#{cache_path} --work-tree=#{install_dir} tag -f restore_here "#{ipc.tag}"})
         allow(ipc).to receive(:create_cache_path)
       end
 
@@ -177,25 +179,54 @@ module Omnibus
         ipc.restore
       end
 
-      it "checks for a tag with the software and version, and if it finds it, checks it out" do
+      it "checks for a tag with the software and version, and if it finds it, marks it as restoration point" do
         expect(ipc).to receive(:shellout!)
           .with(%Q{git -c core.autocrlf=false --git-dir=#{cache_path} --work-tree=#{install_dir} tag -l "#{ipc.tag}"})
           .and_return(tag_cmd)
         expect(ipc).to receive(:shellout!)
-          .with(%Q{git -c core.autocrlf=false --git-dir=#{cache_path} --work-tree=#{install_dir} checkout -f "#{ipc.tag}"})
+          .with(%Q{git -c core.autocrlf=false --git-dir=#{cache_path} --work-tree=#{install_dir} tag -f restore_here "#{ipc.tag}"})
         ipc.restore
       end
 
       describe "if the tag does not exist" do
         let(:git_tag_output) { "\n" }
+        let(:restore_tag_cmd) do
+          cmd_double = double(Mixlib::ShellOut)
+          allow(cmd_double).to receive(:stdout).and_return(git_restore_tag_output)
+          allow(cmd_double).to receive(:error!).and_return(cmd_double)
+          cmd_double
+        end
 
-        it "does nothing" do
-          expect(ipc).to receive(:shellout!)
-            .with(%Q{git -c core.autocrlf=false --git-dir=#{cache_path} --work-tree=#{install_dir} tag -l "#{ipc.tag}"})
-            .and_return(tag_cmd)
-          expect(ipc).to_not receive(:shellout!)
-            .with(%Q{git -c core.autocrlf=false --git-dir=#{cache_path} --work-tree=#{install_dir} checkout -f "#{ipc.tag}"})
-          ipc.restore
+        describe "if the restore marker tag exists" do
+          let(:git_restore_tag_output) { "restore_here\n" }
+
+          it "checks out the last save restoration point and deletes the marker tag" do
+            expect(ipc).to receive(:shellout!)
+              .with(%Q{git -c core.autocrlf=false --git-dir=#{cache_path} --work-tree=#{install_dir} tag -l "restore_here"})
+              .and_return(restore_tag_cmd)
+            expect(ipc).to receive(:shellout!)
+              .with(%Q{git -c core.autocrlf=false --git-dir=#{cache_path} --work-tree=#{install_dir} tag -l "#{ipc.tag}"})
+              .and_return(tag_cmd)
+            expect(ipc).to receive(:shellout!)
+              .with(%Q{git -c core.autocrlf=false --git-dir=#{cache_path} --work-tree=#{install_dir} checkout -f restore_here})
+            expect(ipc).to receive(:shellout!)
+              .with(%Q{git -c core.autocrlf=false --git-dir=#{cache_path} --work-tree=#{install_dir} tag -d restore_here})
+            ipc.restore
+          end
+        end
+
+        describe "if the restore marker tag does not exist" do
+          let(:git_restore_tag_output) { "\n" }
+
+          it "does nothing" do
+            expect(ipc).to receive(:shellout!)
+              .with(%Q{git -c core.autocrlf=false --git-dir=#{cache_path} --work-tree=#{install_dir} tag -l "restore_here"})
+              .and_return(restore_tag_cmd)
+            expect(ipc).to receive(:shellout!)
+              .with(%Q{git -c core.autocrlf=false --git-dir=#{cache_path} --work-tree=#{install_dir} tag -l "#{ipc.tag}"})
+              .and_return(tag_cmd)
+            ipc.restore
+          end
         end
       end
     end

@@ -45,8 +45,9 @@ module Omnibus
     include_examples "a configurable", :fetcher_read_timeout, 60
     include_examples "a configurable", :fetcher_retries, 5
     include_examples "a configurable", :fatal_licensing_warnings, false
+    include_examples "a configurable", :fips_mode, false
 
-    describe '#workers' do
+    describe "#workers" do
       context "when the Ohai data is not present" do
         before do
           stub_ohai(platform: "ubuntu", version: "12.04") do |data|
